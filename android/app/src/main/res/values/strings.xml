@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Budget Wheel</string>
+    <string name="widget_name">Budget Wheel</string>
+    <string name="widget_description">Your wheel and I purchased. Add it from the home screen widget picker.</string>
+    <string name="widget_buy">I purchased</string>
+    <string name="widget_prev">Previous category</string>
+    <string name="widget_next">Next category</string>
+    <string name="widget_open_app">Open Budget Wheel</string>
+    <string name="widget_graph">Show graph</string>
+    <string name="widget_show_wheel">Show wheel</string>
+    <string name="widget_back">Back</string>
+    <string name="widget_continue">Continue</string>
+    <string name="widget_add_to">Add to %1$s</string>
+    <string name="widget_which">Which category?</string>
+    <string name="widget_empty">Open Budget Wheel and set up your budget. Then this widget shows your wheel.</string>
+    <string name="widget_stat_budgeted">budgeted</string>
+    <string name="widget_stat_spent">spent</string>
+    <string name="widget_stat_left">budget-left</string>
+    <string name="widget_stat_income">Income</string>
+    <string name="widget_income_title">Income</string>
+    <string name="widget_stat_over">over-Budget</string>
+    <string name="widget_not_in_budget">Not in your budget</string>
+    <string name="widget_of_income">%1$s of income</string>
+    <string name="widget_this_period">This %1$s</string>
+    <string name="widget_all_categories">All categories</string>
+</resources>

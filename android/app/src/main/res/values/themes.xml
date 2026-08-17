@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.BudgetWheel" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:statusBarColor">@color/bw_bg</item>
+        <item name="android:navigationBarColor">@color/bw_bg</item>
+        <item name="android:windowBackground">@color/bw_bg</item>
+        <item name="android:colorPrimary">@color/bw_primary</item>
+    </style>
+</resources>

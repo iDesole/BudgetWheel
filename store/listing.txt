@@ -1,0 +1,56 @@
+BUDGET WHEEL — GOOGLE PLAY LISTING COPY
+Paste these into Play Console > Grow > Store presence > Main store listing.
+
+================================================================
+App name (30)
+================================================================
+Budget Wheel
+
+================================================================
+Short description (80)
+================================================================
+See where every dollar goes. On-device budgeting with a live wheel and widget.
+
+Character count: 78
+
+================================================================
+Full description
+================================================================
+Budget Wheel shows where every dollar of your take-home pay goes.
+
+Start with real income — salary or hourly, plus your state — and get a monthly take-home estimate you can confirm or adjust. Then assign each category a dollar amount or a percent of income. Anything you do not assign becomes Extra Funds.
+
+The home screen is a wheel. 100% is your income for the month. Tap a slice to see what you spent. Tap I purchased, enter the amount, and pick a category. If a slice is already selected, the purchase goes there.
+
+Need a bar graph instead? Toggle Wheel / Graph. Switch Monthly, Quarterly, or Yearly without changing the budget you set.
+
+A matching home-screen widget shows the same monthly wheel or graph and lets you log a purchase without opening the app. The app and widget stay in sync.
+
+Spending starts over on the 1st. Closed months, quarters, and years stay in Spending history on this device. Download a PDF or delete history when you want.
+
+Your information stays on this device. Budget Wheel does not collect, transmit, or sell your personal or financial information. There is no account and no server. Uninstalling the app erases the budget on that device.
+
+Take-home is an estimate for a single filer with no local tax. It is a planning number, not tax advice.
+
+================================================================
+App category
+================================================================
+Finance
+
+Tags (pick up to 5 that match):
+Budgeting, Expense tracker, Personal finance, Money management
+
+================================================================
+Contact
+================================================================
+Use your Google Play developer email.
+Privacy policy URL: host store/privacy.html at a public https:// address
+  (GitHub Pages, Google Sites, or any static host), then paste that URL
+  into Policy > App content > Privacy policy.
+
+================================================================
+Graphic assets in this folder
+================================================================
+play-icon-512.png          High-res icon (512 x 512)
+feature-graphic.png        Feature graphic (1024 x 500)
+screenshots/               Phone screenshots (1080 x 1920)

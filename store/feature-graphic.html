@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Budget Wheel feature graphic</title>
+    <style>
+      @font-face {
+        font-family: Outfit;
+        font-style: normal;
+        font-weight: 600;
+        src: url("outfit-600.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: Outfit;
+        font-style: normal;
+        font-weight: 800;
+        src: url("outfit-800.woff2") format("woff2");
+      }
+      html, body {
+        margin: 0;
+        width: 1024px;
+        height: 500px;
+        overflow: hidden;
+        background: #0d0c10;
+      }
+      .art {
+        width: 1024px;
+        height: 500px;
+        display: flex;
+        align-items: center;
+        padding: 0 72px 0 40px;
+        gap: 36px;
+        background:
+          radial-gradient(circle at 18% 50%, rgba(240, 201, 77, 0.12), transparent 44%),
+          #132239;
+        color: #f4eff7;
+        font-family: Outfit, "Segoe UI", sans-serif;
+        box-sizing: border-box;
+      }
+      img {
+        width: 360px;
+        height: 360px;
+        flex: 0 0 auto;
+      }
+      .copy { min-width: 0; }
+      .kicker {
+        margin: 0 0 10px;
+        color: #f0c94d;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-weight: 600;
+        font-size: 18px;
+      }
+      h1 {
+        margin: 0 0 14px;
+        font-size: 72px;
+        line-height: 0.95;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+      }
+      p {
+        margin: 0;
+        color: #cac4d0;
+        font-size: 26px;
+        font-weight: 600;
+        line-height: 1.25;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="art">
+      <img src="play-icon-512.png" alt="" />
+      <div class="copy">
+        <p class="kicker">On-device budgeting</p>
+        <h1>Budget Wheel</h1>
+        <p>See where every dollar goes.</p>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bw_bg">#0D0C10</color>
+    <color name="bw_icon_bg">#132239</color>
+    <color name="bw_surface">#1C1B21</color>
+    <color name="bw_surface2">#26252C</color>
+    <color name="bw_on">#F4EFF7</color>
+    <color name="bw_soft">#CAC4D0</color>
+    <color name="bw_primary">#F0C94D</color>
+    <color name="bw_on_primary">#3B2F00</color>
+    <color name="bw_error">#FFB4AB</color>
+    <color name="bw_outline">#49454F</color>
+    <color name="bw_outline_soft">#948F99</color>
+    <color name="bw_surface4">#313036</color>
+    <color name="bw_warn">#FFB68A</color>
+</resources>

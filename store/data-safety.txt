@@ -1,0 +1,102 @@
+BUDGET WHEEL — PLAY CONSOLE ANSWERS
+Use these in Policy > App content. They match what the 1.0.0 app actually does.
+
+================================================================
+Privacy policy
+================================================================
+Required. Host store/privacy.html on a public https URL and paste the link.
+
+Does your app collect or share any of the required user data types?
+No.
+
+Does all of the user data collected by your app comply with Google Play’s
+User Data policy?  Yes  (nothing is collected)
+
+================================================================
+Data safety form
+================================================================
+Does your app collect or share any of the required user data types?
+No
+
+Privacy policy URL:  (the public URL of store/privacy.html)
+
+Is your app designed so that families can use it?
+No — it is a personal finance tool for adults.
+
+================================================================
+Financial features
+================================================================
+Does your app provide any financial features?
+Yes — personal finance / budgeting / expense tracking only.
+
+It is NOT:
+- A bank, credit union, or neobank
+- A payments, wallet, or money-transfer app
+- A lending, credit, or loan product
+- Tax filing software
+- Crypto, trading, or investing
+
+Income figures are on-device estimates (single filer, no local tax).
+They are not tax, legal, or investment advice.
+
+================================================================
+Ads
+================================================================
+No ads.
+
+================================================================
+App access
+================================================================
+All functionality is available without a login.
+
+================================================================
+Content ratings (IARC questionnaire)
+================================================================
+This is a utility / finance app.
+- No user-generated public content
+- No violence, sexual content, or language
+- No location sharing
+- No digital purchases inside the app (price the app itself in Play Console)
+- Not targeted at children
+
+Expected rating: Everyone / PEGI 3 equivalent.
+
+================================================================
+Target audience
+================================================================
+Age 18+ (or 13+ if you prefer a wider store listing).
+Not designed for children.
+
+================================================================
+News / COVID / Data deletion
+================================================================
+News app: No
+COVID-19: No
+Government app: No
+
+Account deletion: Not applicable — there is no account.
+Users can Reset budget data in Settings, or uninstall the app.
+
+================================================================
+Permissions declared
+================================================================
+None. The app does not request INTERNET, storage, camera, location,
+contacts, or notifications.
+
+The home-screen widget is an App Widget. It reads the same on-device
+budget JSON as the app. It does not access the internet.
+
+PDF export on Android 10+ uses MediaStore Downloads. No storage
+permission is required.
+
+================================================================
+Government apps / Health / Blockchain
+================================================================
+No.
+
+================================================================
+Paid app vs in-app products
+================================================================
+Price the app in Play Console (one-time paid or free).
+Do not add Play Billing products unless you later ship a catalog IAP.
+There is no paywall in the APK.
