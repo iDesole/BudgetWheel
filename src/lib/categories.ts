@@ -122,6 +122,7 @@ export function retireDebtPayments(
   return { categories: nextCats, transactions: nextTx };
 }
 
+/** Leftover unassigned take-home. Not a user budget; Add Funds grows it. */
 export const EXTRA_FUNDS_ID = "cat_extra";
 export const EXTRA_FUNDS_NAME = "Extra Funds";
 export const NOT_IN_BUDGET_ID = "cat_notinbudget";
@@ -129,6 +130,30 @@ export const EMERGENCY_ID = "cat_emergency";
 
 export function canHideCategory(id: string): boolean {
   return id !== EXTRA_FUNDS_ID && id !== NOT_IN_BUDGET_ID && id !== EMERGENCY_ID;
+}
+
+/** User-set envelope, not leftover Extra Funds. */
+export function isAssignedBudget(id: string, envelope: number): boolean {
+  return id !== EXTRA_FUNDS_ID && envelope > 0.009;
+}
+
+/** Spend with no assigned envelope — Not in the Budget and other unbudgeted slices. */
+export function isOutOfBudgetSpend(id: string, envelope: number): boolean {
+  return id !== EXTRA_FUNDS_ID && envelope <= 0.009;
+}
+
+/** Extra Funds is leftover income, never budget spending. */
+export function budgetSpendTotals(
+  slices: Array<{ id: string; envelope: number; spent: number; budgeted?: number }>,
+): { envelope: number; spent: number; outOfBudget: number; remaining: number; budgeted: number } {
+  const assigned = slices.filter((s) => isAssignedBudget(s.id, s.envelope));
+  const envelope = assigned.reduce((sum, c) => sum + c.envelope, 0);
+  const spent = assigned.reduce((sum, c) => sum + c.spent, 0);
+  const outOfBudget = slices
+    .filter((s) => isOutOfBudgetSpend(s.id, s.envelope))
+    .reduce((sum, c) => sum + c.spent, 0);
+  const budgeted = assigned.reduce((sum, c) => sum + (c.budgeted ?? c.envelope), 0);
+  return { envelope, spent, outOfBudget, remaining: envelope - spent, budgeted };
 }
 
 export function syncExtraFunds(categories: Category[], monthlyIncome: number): Category[] {

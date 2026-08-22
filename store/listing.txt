@@ -18,13 +18,13 @@ Full description
 ================================================================
 Budget Wheel shows where every dollar of your take-home pay goes.
 
-Start with real income — salary or hourly, plus your state — and get a monthly take-home estimate you can confirm or adjust. Then assign each category a dollar amount or a percent of income. Anything you do not assign becomes Extra Funds.
+Start with real income. Choose salary or hourly, add your state, and get a monthly take-home estimate you can confirm or adjust. Then give each category a dollar amount or a percent of income. Anything you do not assign becomes Extra Funds.
 
-The home screen is a wheel. 100% is your income for the month. Tap a slice to see what you spent. Tap I purchased, enter the amount, and pick a category. If a slice is already selected, the purchase goes there.
+The home screen is a wheel. 100% is this month’s income. Tap a slice to see what you spent. Tap I purchased, enter the amount, and pick a category. If a slice is already selected, the purchase goes straight there.
 
-Need a bar graph instead? Toggle Wheel / Graph. Switch Monthly, Quarterly, or Yearly without changing the budget you set.
+Need a clearer view? Switch between the wheel and a bar graph. Change Monthly, Quarterly, or Yearly without rewriting the budget you set.
 
-A matching home-screen widget shows the same monthly wheel or graph and lets you log a purchase without opening the app. The app and widget stay in sync.
+The home-screen widget matches the app. It shows this month’s wheel or graph and lets you log a purchase without opening Budget Wheel. The app and widget stay in sync.
 
 Spending starts over on the 1st. Closed months, quarters, and years stay in Spending history on this device. Download a PDF or delete history when you want.
 
@@ -44,9 +44,8 @@ Budgeting, Expense tracker, Personal finance, Money management
 Contact
 ================================================================
 Use your Google Play developer email.
-Privacy policy URL: host store/privacy.html at a public https:// address
-  (GitHub Pages, Google Sites, or any static host), then paste that URL
-  into Policy > App content > Privacy policy.
+Privacy policy URL:
+https://idesole.github.io/budgetwheel-privacy/
 
 ================================================================
 Graphic assets in this folder

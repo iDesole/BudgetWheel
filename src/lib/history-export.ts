@@ -3,12 +3,12 @@
  *
  * Layout, top to bottom:
  *   1. Title + date range
- *   2. Budgeted / spent / left (same numbers as the in-app graph header)
+ *   2. Budgeted / spent / out of budget / left (same numbers as the in-app graph header)
  *   3. One bar card per category (same shape as the live graph)
  *   4. Purchases grouped by category
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
-import { EXTRA_FUNDS_ID } from "./categories.ts";
+import { budgetSpendTotals } from "./categories.ts";
 import { isAndroidApp } from "./android.ts";
 import { periodLabel } from "./history.ts";
 import { formatPct } from "./money.ts";
@@ -252,9 +252,10 @@ class HistoryPdf {
     income: number;
     envelope: number;
     spent: number;
+    outOfBudget: number;
     remaining: number;
   }): void {
-    const h = 96;
+    const h = 140;
     this.ensure(h + 12);
     const bottom = this.y - h;
     this.card(MARGIN, bottom, CONTENT_W, h);
@@ -265,35 +266,52 @@ class HistoryPdf {
     const inner = CONTENT_W - 28;
     const cellW = (inner - gap * (cols - 1)) / cols;
     const cellH = 36;
-    const cellY = bottom + 12;
     const over = opts.remaining < 0;
-    const cells = [
+    const oob = opts.outOfBudget > 0.009;
+    const top = [
       { val: opts.envelope > 0 ? money(opts.envelope) : "-", lbl: "budgeted", warn: false },
       { val: money(opts.spent), lbl: "spent", warn: false },
-      {
-        val: money(over ? -opts.remaining : opts.remaining),
-        lbl: over ? "over-Budget" : "budget-left",
-        warn: over,
-      },
+      { val: money(opts.outOfBudget), lbl: "out of budget", warn: oob },
     ];
-    cells.forEach((cell, i) => {
+    const topY = bottom + 12 + cellH + gap;
+    top.forEach((cell, i) => {
       const x = MARGIN + 14 + i * (cellW + gap);
-      this.page.drawSvgPath(roundedRect(x, cellY, cellW, cellH, 10), { color: track });
+      this.page.drawSvgPath(roundedRect(x, topY, cellW, cellH, 10), { color: track });
       const vw = this.bold.widthOfTextAtSize(pdfSafe(cell.val), 10);
       this.text(cell.val, {
         x: x + (cellW - Math.min(vw, cellW - 8)) / 2,
-        y: cellY + 18,
+        y: topY + 18,
         size: 10,
         bold: true,
         color: cell.warn ? err : on,
       });
       const lw = this.font.widthOfTextAtSize(cell.lbl.toUpperCase(), 7);
       this.text(cell.lbl.toUpperCase(), {
-        x: x + (cellW - lw) / 2,
-        y: cellY + 7,
+        x: x + (cellW - Math.min(lw, cellW - 6)) / 2,
+        y: topY + 7,
         size: 7,
         color: soft,
       });
+    });
+    const leftX = MARGIN + 14 + 2 * (cellW + gap);
+    const leftY = bottom + 12;
+    this.page.drawSvgPath(roundedRect(leftX, leftY, cellW, cellH, 10), { color: track });
+    const leftLbl = over ? "over-Budget" : "budget-left";
+    const leftVal = money(over ? -opts.remaining : opts.remaining);
+    const lvw = this.bold.widthOfTextAtSize(pdfSafe(leftVal), 10);
+    this.text(leftVal, {
+      x: leftX + (cellW - Math.min(lvw, cellW - 8)) / 2,
+      y: leftY + 18,
+      size: 10,
+      bold: true,
+      color: over ? err : on,
+    });
+    const llw = this.font.widthOfTextAtSize(leftLbl.toUpperCase(), 7);
+    this.text(leftLbl.toUpperCase(), {
+      x: leftX + (cellW - llw) / 2,
+      y: leftY + 7,
+      size: 7,
+      color: soft,
     });
     this.y = bottom - 14;
   }
@@ -416,9 +434,10 @@ async function buildHistoryPdf(snap: WheelSnapshot): Promise<Uint8Array> {
   const slices = historyWheelSlices(snap);
   const txs = transactionsForSnapshot(snap);
   const monthlyIncome = snap.monthlyIncome;
-  const assigned = slices.filter((s) => s.id !== EXTRA_FUNDS_ID);
-  const totalEnv = assigned.reduce((s, c) => s + c.envelope, 0);
-  const totalSpent = slices.reduce((s, c) => s + c.spent, 0);
+  const totals = budgetSpendTotals(slices);
+  const totalEnv = totals.envelope;
+  const totalSpent = totals.spent;
+  const outOfBudget = totals.outOfBudget;
   const title = periodLabel(snap);
   const range = formatQuarterRange(snap.startIso, snap.endIso);
 
@@ -432,6 +451,7 @@ async function buildHistoryPdf(snap: WheelSnapshot): Promise<Uint8Array> {
     income: monthlyIncome * snap.periodMonths,
     envelope: totalEnv,
     spent: totalSpent,
+    outOfBudget,
     remaining: totalEnv - totalSpent,
   });
   pdf.drawBars(slices);

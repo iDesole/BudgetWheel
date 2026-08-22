@@ -40,11 +40,14 @@ export function nextIncomeNumber(income: Income | null | undefined): number {
   return listedSources(income).length + 1;
 }
 
+export const ADDED_FUNDS_SOURCE_ID = "inc_added_funds";
+
 export function isSideSource(source: Pick<IncomeSource, "kind" | "type">): boolean {
   return source.kind === "side" || source.type === "side";
 }
 
 export function sourceTypeLabel(source: IncomeSource): string {
+  if (source.id === ADDED_FUNDS_SOURCE_ID) return "Added extra funds";
   if (isSideSource(source)) return "Side · after tax";
   if (source.type === "hourly") return "Hourly";
   return source.salaryPeriod === "monthly" ? "Monthly salary" : "Salary";

@@ -1,14 +1,16 @@
 /**
  * In-app screens after onboarding: home wheel/graph, spend history,
  * purchases, archived periods, and settings.
- * Shared chrome (graph header, top bar) lives at the top so home and
- * history render the same cards.
+ * Shared chrome (graph header, top bar, Extra Funds / out-of-budget totals)
+ * lives at the top so home and history render the same cards. Extra Funds is
+ * leftover income, never budget spending. Selected Extra Funds uses Add Funds.
  */
 import { incomeSlotLabel, listedSources, nextIncomeNumber, sourceTypeLabel } from "../lib/income.ts";
 import { formatMoney, formatPct, parsePad, padDisplay, appendPad, escapeHtml } from "../lib/money.ts";
 import { formatQuarterRange, getQuarter } from "../lib/quarter.ts";
 import { findState } from "../lib/states.ts";
 import {
+  addExtraFunds,
   addPurchase,
   back,
   categoryById,
@@ -40,7 +42,7 @@ import {
   wheelCategories,
 } from "../store.ts";
 import type { HistoryScale, WheelSnapshot } from "../types.ts";
-import { EXTRA_FUNDS_ID, NOT_IN_BUDGET_ID } from "../lib/categories.ts";
+import { EXTRA_FUNDS_ID, NOT_IN_BUDGET_ID, budgetSpendTotals } from "../lib/categories.ts";
 import { downloadHistoryWheels } from "../lib/history-export.ts";
 import { periodLabel, periodWord } from "../lib/history.ts";
 import { openCategoryBudget, openColorPicker, openIncomeSource } from "./onboarding.ts";
@@ -91,19 +93,36 @@ function budgetChartMarkup(
     </div>`;
 }
 
-/** Assigned budgets only. Extra Funds is leftover income, not something the user set. */
-function graphPeriodTotals(
-  slices: Array<{ id: string; envelope: number; spent: number; budgeted: number }>,
-): { envelope: number; spent: number; remaining: number; budgeted: number } {
-  const assigned = slices.filter((s) => s.id !== EXTRA_FUNDS_ID);
-  const envelope = assigned.reduce((sum, c) => sum + c.envelope, 0);
-  const spent = slices.reduce((sum, c) => sum + c.spent, 0);
-  const budgeted = assigned.reduce((sum, c) => sum + c.budgeted, 0);
-  return { envelope, spent, remaining: envelope - spent, budgeted };
+
+
+function wheelCornerTotalsMarkup(
+  totals: { outOfBudget: number; remaining: number },
+  visible: boolean,
+): string {
+  if (!visible) return "";
+  const over = totals.remaining < 0;
+  const oob = totals.outOfBudget > 0.009;
+  return `<div class="wheel-corner-totals">
+    <p class="wheel-corner-row${oob ? " is-neg" : ""}">
+      <span class="wheel-corner-val">${formatMoney(totals.outOfBudget)}</span>
+      <span class="wheel-corner-lbl">out of budget</span>
+    </p>
+    <p class="wheel-corner-row${over ? " is-neg" : ""}">
+      <span class="wheel-corner-val">${formatMoney(over ? -totals.remaining : totals.remaining)}</span>
+      <span class="wheel-corner-lbl">${over ? "over-Budget" : "budget-left"}</span>
+    </p>
+  </div>`;
+}
+
+function budgetLeftStat(remaining: number): string {
+  const over = remaining < 0;
+  return `<div class="graph-stat">
+      <span class="graph-stat-val ${over ? "is-neg" : ""}">${formatMoney(over ? -remaining : remaining)}</span>
+      <span class="graph-stat-lbl">${over ? "over-Budget" : "budget-left"}</span>
+    </div>`;
 }
 
 function budgetSpentOverMarkup(selected: { envelope: number; spent: number; remaining: number }): string {
-  const over = selected.remaining < 0;
   return `<div class="graph-detail-stats">
     <div class="graph-stat">
       <span class="graph-stat-val">${selected.envelope > 0 ? formatMoney(selected.envelope) : "—"}</span>
@@ -113,9 +132,27 @@ function budgetSpentOverMarkup(selected: { envelope: number; spent: number; rema
       <span class="graph-stat-val">${formatMoney(selected.spent)}</span>
       <span class="graph-stat-lbl">spent</span>
     </div>
+    ${budgetLeftStat(selected.remaining)}
+  </div>`;
+}
+
+function totalsStatsMarkup(totals: { envelope: number; spent: number; outOfBudget: number; remaining: number }): string {
+  const oob = totals.outOfBudget > 0.009;
+  return `<div class="graph-detail-stats is-totals">
     <div class="graph-stat">
-      <span class="graph-stat-val ${over ? "is-neg" : ""}">${formatMoney(over ? -selected.remaining : selected.remaining)}</span>
-      <span class="graph-stat-lbl">${over ? "over-Budget" : "budget-left"}</span>
+      <span class="graph-stat-val">${totals.envelope > 0 ? formatMoney(totals.envelope) : "—"}</span>
+      <span class="graph-stat-lbl">budgeted</span>
+    </div>
+    <div class="graph-stat">
+      <span class="graph-stat-val">${formatMoney(totals.spent)}</span>
+      <span class="graph-stat-lbl">spent</span>
+    </div>
+    <div class="graph-stat-stack">
+      <div class="graph-stat">
+        <span class="graph-stat-val${oob ? " is-neg" : ""}">${formatMoney(totals.outOfBudget)}</span>
+        <span class="graph-stat-lbl">out of budget</span>
+      </div>
+      ${budgetLeftStat(totals.remaining)}
     </div>
   </div>`;
 }
@@ -137,7 +174,7 @@ function graphDetailMarkup(opts: {
     spent: number;
     remaining: number;
   } | null;
-  totals: { envelope: number; spent: number; remaining: number };
+  totals: { envelope: number; spent: number; outOfBudget: number; remaining: number };
   monthlyIncome: number;
   periodIncome: number;
   totalBudgeted: number;
@@ -165,7 +202,7 @@ function graphDetailMarkup(opts: {
                   <strong>${formatMoney(opts.periodIncome)}</strong>
                 </span>
               </div>
-              ${budgetSpentOverMarkup(opts.totals)}
+              ${totalsStatsMarkup(opts.totals)}
             </div>`;
 }
 
@@ -187,10 +224,9 @@ export function renderHome(): HTMLElement {
   const q = getQuarter();
   const slices = wheelCategories();
   const selected = slices.find((s) => s.id === selectedSliceId) ?? null;
-  const totals = graphPeriodTotals(slices);
+  const totals = budgetSpendTotals(slices);
   const totalEnv = totals.envelope;
   const totalSpent = totals.spent;
-  const totalLeft = totals.remaining;
   const monthlyIncome = state.income?.monthlyTakeHome ?? 0;
   const periodIncome = monthlyIncome * periodMultiplier();
   const scale = state.wheelScale;
@@ -223,7 +259,7 @@ export function renderHome(): HTMLElement {
   const graphDetail = graphMode
     ? graphDetailMarkup({
         selected,
-        totals: { envelope: totalEnv, spent: totalSpent, remaining: totalLeft },
+        totals,
         monthlyIncome,
         periodIncome,
         totalBudgeted,
@@ -283,6 +319,7 @@ export function renderHome(): HTMLElement {
           subPrimary: selected ? `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}` : `${formatMoney(totalSpent)} spent`,
           subSecondary: selected ? undefined : `of ${formatMoney(totalEnv)} budget`,
         })}
+        ${wheelCornerTotalsMarkup(totals, !selected)}
         ${
           slices.length
             ? `<button type="button" class="wheel-cycle-btn is-left" data-cycle="1" aria-label="Previous category">${backChevron}</button>
@@ -306,7 +343,9 @@ export function renderHome(): HTMLElement {
             ? ""
             : `<p class="hint center-hint">${slices.length ? "Tap a slice for details" : "Set category amounts in Settings"}</p>`
       }
-      <button type="button" class="btn btn-primary btn-purchase" data-buy>I purchased</button>
+      <button type="button" class="btn btn-primary btn-purchase" data-buy>${
+        selected?.id === EXTRA_FUNDS_ID ? "Add Funds" : "I purchased"
+      }</button>
       </div>
       ${navBar("home")}
     </section>`;
@@ -472,26 +511,28 @@ export function renderCategoryActivity(categoryId: string, periodId?: string): H
     const id = (ev.currentTarget as HTMLElement).dataset.colorFor ?? "";
     openColorPicker(el, id);
   });
-  el.querySelectorAll<HTMLButtonElement>("[data-del]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.del ?? "";
-      const line = lines.find((item) => item.id === id);
-      if (!id || !line || line.archiveLabel) return;
-      el.querySelector(".over-sheet")?.remove();
-      const sheet = document.createElement("div");
-      sheet.className = "over-sheet";
-      sheet.innerHTML = `
-        <div class="over-card">
-          <h2 class="headline">Delete this ${formatMoney(line.amount)} purchase?</h2>
-          <p class="sub">It will be removed from this ${periodWord}.</p>
-          <button type="button" class="btn btn-primary btn-xl" data-del-yes>Yes, delete it</button>
-          <button type="button" class="btn btn-ghost" data-del-no>Cancel</button>
-        </div>`;
-      el.querySelector(".screen")?.append(sheet);
-      sheet.querySelector("[data-del-no]")?.addEventListener("click", () => sheet.remove());
-      sheet.querySelector("[data-del-yes]")?.addEventListener("click", async () => {
-        await deletePurchase(id);
-      });
+  el.querySelector(".activity-list")?.addEventListener("click", (ev) => {
+    const btn = (ev.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-del]");
+    if (!btn || !el.contains(btn)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const id = btn.dataset.del ?? "";
+    const line = lines.find((item) => item.id === id);
+    if (!id || !line || line.archiveLabel) return;
+    el.querySelector(".over-sheet")?.remove();
+    const sheet = document.createElement("div");
+    sheet.className = "over-sheet";
+    sheet.innerHTML = `
+      <div class="over-card">
+        <h2 class="headline">Delete this ${formatMoney(line.amount)} purchase?</h2>
+        <p class="sub">It will be removed from this ${periodWord}.</p>
+        <button type="button" class="btn btn-primary btn-xl" data-del-yes>Yes, delete it</button>
+        <button type="button" class="btn btn-ghost" data-del-no>Cancel</button>
+      </div>`;
+    el.querySelector(".screen")?.append(sheet);
+    sheet.querySelector("[data-del-no]")?.addEventListener("click", () => sheet.remove());
+    sheet.querySelector("[data-del-yes]")?.addEventListener("click", async () => {
+      await deletePurchase(id);
     });
   });
   return el;
@@ -503,18 +544,25 @@ export function renderCategoryActivity(categoryId: string, periodId?: string): H
 
 export function renderPurchaseAmount(): HTMLElement {
   const target = wheelCategories().find((c) => c.id === selectedSliceId) ?? null;
+  const addingFunds = target?.id === EXTRA_FUNDS_ID;
   const el = document.createElement("div");
   el.innerHTML = `
     <section class="screen screen-pad">
-      ${topBar("I purchased")}
-      ${target ? `<p class="catalog-kicker">Adding to ${escapeHtml(target.name)}</p>` : ""}
+      ${topBar(addingFunds ? "Add Funds" : "I purchased")}
+      ${
+        addingFunds
+          ? `<p class="catalog-kicker">Extra cash that landed this month</p>`
+          : target
+            ? `<p class="catalog-kicker">Adding to ${escapeHtml(target.name)}</p>`
+            : ""
+      }
       <p class="display-amount" id="pad-display">${padDisplay(purchasePad)}</p>
       <div class="flex-spacer"></div>
       ${numpadMarkup()}
       <div class="pad-actions">
         <button type="button" class="btn btn-ghost" data-back>Back</button>
         <button type="button" class="btn btn-primary" data-next ${parsePad(purchasePad) > 0 ? "" : "disabled"}>${
-          target ? `Add to ${escapeHtml(target.name)}` : "Continue"
+          addingFunds ? "Add Funds" : target ? `Add to ${escapeHtml(target.name)}` : "Continue"
         }</button>
       </div>
     </section>`;
@@ -534,6 +582,13 @@ export function renderPurchaseAmount(): HTMLElement {
   next?.addEventListener("click", async () => {
     const amount = parsePad(purchasePad);
     if (amount <= 0) return;
+    if (addingFunds) {
+      next.disabled = true;
+      await addExtraFunds(amount);
+      setSelectedSlice(EXTRA_FUNDS_ID);
+      resetNav({ id: "home" });
+      return;
+    }
     if (target) {
       next.disabled = true;
       await addPurchase(target.id, amount);
@@ -876,10 +931,9 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
 
   const slices = historyWheelSlices(snap);
   const selected = slices.find((s) => s.id === selectedSliceId) ?? null;
-  const totals = graphPeriodTotals(slices);
+  const totals = budgetSpendTotals(slices);
   const totalEnv = totals.envelope;
   const totalSpent = totals.spent;
-  const totalLeft = totals.remaining;
   const monthlyIncome = snap.monthlyIncome;
   const periodIncome = monthlyIncome * snap.periodMonths;
   const word = periodWord(snap.scale);
@@ -902,7 +956,7 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
   const graphDetail = graphMode
     ? graphDetailMarkup({
         selected,
-        totals: { envelope: totalEnv, spent: totalSpent, remaining: totalLeft },
+        totals,
         monthlyIncome,
         periodIncome,
         totalBudgeted,
@@ -946,6 +1000,7 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
           subPrimary: selected ? `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}` : `${formatMoney(totalSpent)} spent`,
           subSecondary: selected ? undefined : `of ${formatMoney(totalEnv)} budget`,
         })}
+        ${wheelCornerTotalsMarkup(totals, !selected)}
         ${
           slices.length
             ? `<button type="button" class="wheel-cycle-btn is-left" data-cycle="1" aria-label="Previous category">${backChevron}</button>

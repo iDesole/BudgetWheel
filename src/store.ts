@@ -5,13 +5,16 @@
  *   1. In-memory UI (screen stack, selected slice, toasts)
  *   2. History archives (thin wrappers over src/lib/history.ts)
  *   3. Persist — IndexedDB plus the Android widget JSON
- *   4. Mutations (income, categories, purchases)
+ *   4. Mutations (income, Extra Funds adds, categories, purchases)
  *   5. Live wheel queries (period spend, slices, over-budget)
  *   6. Period rollover at local midnight
  *
- * The widget is the same budget. persist() always absorbAndroidBudget()
- * first, then writes IndexedDB and pushBudgetToAndroid(state, priorUpdatedAt).
- * Native merge keeps widget purchases newer than priorUpdatedAt.
+ * The widget is the same budget. persist() absorbs widget JSON unless
+ * skipAbsorb (local deletes / Add Funds). A newer widget copy can update
+ * income and leftover Extra Funds; local transaction deletes still win.
+ * Then IndexedDB write + pushBudgetToAndroid. Native merge keeps widget
+ * purchases newer than priorUpdatedAt. Extra Funds is leftover income,
+ * never assigned budget spending.
  */
 import { ensureDeviceSession, getCachedUser, type AuthUser } from "./auth.ts";
 import { idbDel, idbGet, idbSet } from "./db.ts";
@@ -24,7 +27,7 @@ import {
   retireDebtPayments,
   syncExtraFunds,
 } from "./lib/categories.ts";
-import { combineIncome, finalizeIncome, listedSources, normalizeSourceKinds } from "./lib/income.ts";
+import { ADDED_FUNDS_SOURCE_ID, combineIncome, finalizeIncome, listedSources, normalizeSourceKinds } from "./lib/income.ts";
 import { clampMoney, uid } from "./lib/money.ts";
 import {
   advancePeriodCursor,
@@ -457,7 +460,7 @@ export async function deleteHistorySnapshots(
   );
   if (!found.length) return 0;
   applyHistoryPack(deleteHistory(before, found, opts ?? {}, currentIncome(), state.categories));
-  await persist();
+  await persist({ skipAbsorb: true });
   emit();
   return found.length;
 }
@@ -542,12 +545,24 @@ export function schedulePeriodWatch(): void {
 function absorbAndroidBudget(): boolean {
   const fromWidget = pullBudgetFromAndroid();
   if (!fromWidget) return false;
-  if (fromWidget.updatedAt > state.updatedAt) {
+  if (!state.updatedAt && fromWidget.onboardingComplete) {
     applySaved(fromWidget);
     return true;
   }
   const have = new Set(state.transactions.map((tx) => tx.id));
-  const extra = fromWidget.transactions.filter((tx) => !have.has(tx.id));
+  // New widget purchases only. Older missing ids are local deletes — never
+  // put those back. If the widget wrote last (Add Funds, leftover income),
+  // take its income/categories but keep this device's transaction list.
+  const extra = fromWidget.transactions.filter(
+    (tx) => !have.has(tx.id) && tx.createdAt > state.updatedAt,
+  );
+  if (fromWidget.updatedAt > state.updatedAt) {
+    applySaved({
+      ...fromWidget,
+      transactions: [...state.transactions, ...extra],
+    });
+    return true;
+  }
   if (!extra.length) return false;
   state = {
     ...state,
@@ -760,6 +775,37 @@ export async function removeCategory(id: string): Promise<void> {
   emit();
 }
 
+/** Extra cash into leftover Extra Funds. Not a purchase. Skip absorb so a stale widget JSON cannot wipe the add. */
+export async function addExtraFunds(amount: number): Promise<void> {
+  const add = clampMoney(amount);
+  if (add <= 0 || !state.income) return;
+  rolloverIfNeeded();
+  const current = listedSources(state.income);
+  const existing = current.find((s) => s.id === ADDED_FUNDS_SOURCE_ID);
+  const bumped = existing
+    ? {
+        ...existing,
+        kind: "side" as const,
+        type: "side" as const,
+        monthlyGross: clampMoney(existing.monthlyGross + add),
+        monthlyTakeHome: clampMoney(existing.monthlyTakeHome + add),
+      }
+    : {
+        id: ADDED_FUNDS_SOURCE_ID,
+        kind: "side" as const,
+        type: "side" as const,
+        monthlyGross: add,
+        monthlyTakeHome: add,
+        estimatedTaxAnnual: 0,
+      };
+  const next = existing
+    ? current.map((s) => (s.id === ADDED_FUNDS_SOURCE_ID ? bumped : s))
+    : [...current, bumped];
+  state.income = withSources(state.income.state, next);
+  await persist({ skipAbsorb: true });
+  emit();
+}
+
 export async function addPurchase(categoryId: string, amount: number): Promise<void> {
   rolloverIfNeeded();
   const tx: Transaction = {
@@ -779,7 +825,7 @@ export async function deletePurchase(id: string): Promise<void> {
   if (!tx || next.length === state.transactions.length) return;
   const pack = removePurchaseFromArchives({ ...historyPack(), transactions: next }, tx);
   applyHistoryPack(pack);
-  await persist();
+  await persist({ skipAbsorb: true });
   emit();
 }
 
@@ -848,7 +894,7 @@ export function periodSpentMap(now = new Date()): Map<string, number> {
 export function wheelCategories(): Array<Category & { spent: number; remaining: number; envelope: number }> {
   const spent = periodSpentMap();
   return sortedCategories()
-    .filter((c) => !c.hidden && (c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0))
+    .filter((c) => !c.hidden && (c.id === EXTRA_FUNDS_ID || c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0))
     .map((c) => {
       const used = spent.get(c.id) ?? 0;
       const envelope = quarterlyBudget(c.budgeted);

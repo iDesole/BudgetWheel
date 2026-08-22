@@ -7,6 +7,7 @@
 import { formatMoney, formatPct, parsePad, padDisplay, appendPad, escapeHtml } from "../lib/money.ts";
 import { isWidgetPath, openFullApp } from "../lib/widget.ts";
 import {
+  addExtraFunds,
   addPurchase,
   sessionUser,
   setSelectedSlice,
@@ -15,7 +16,7 @@ import {
   state,
   selectedSliceId,
 } from "../store.ts";
-import { EXTRA_FUNDS_ID } from "../lib/categories.ts";
+import { EXTRA_FUNDS_ID, budgetSpendTotals } from "../lib/categories.ts";
 import { backChevron } from "../ui/icons.ts";
 import { bindNumpad, numpadMarkup } from "../ui/numpad.ts";
 import { wheelCenterMarkup, wheelSvg } from "../ui/wheel.ts";
@@ -143,9 +144,8 @@ function bindLocked(el: HTMLElement): void {
 function wheelMarkup(): string {
   const slices = monthSlices();
   const selected = slices.find((s) => s.id === selectedSliceId) ?? null;
-  const totalSpent = slices.reduce((s, c) => s + c.spent, 0);
+  const totals = budgetSpendTotals(slices);
   const periodIncome = state.income?.monthlyTakeHome ?? 0;
-  const assignedBudget = slices.filter((s) => s.id !== EXTRA_FUNDS_ID).reduce((sum, s) => sum + s.envelope, 0);
   const centerLabel = selected ? selected.name : "Income";
   const centerValue = selected ? selected.remaining : periodIncome;
   return `
@@ -165,12 +165,28 @@ function wheelMarkup(): string {
               label: centerLabel,
               value: formatMoney(centerValue),
               negative: centerValue < 0,
-              subPrimary: selected ? `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}` : `${formatMoney(totalSpent)} spent`,
-              subSecondary: selected ? undefined : `of ${formatMoney(assignedBudget)} budget`,
+              subPrimary: selected ? `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}` : `${formatMoney(totals.spent)} spent`,
+              subSecondary: selected ? undefined : `of ${formatMoney(totals.envelope)} budget`,
             })}
+            ${
+              selected
+                ? ""
+                : `<div class="wheel-corner-totals">
+              <p class="wheel-corner-row${totals.outOfBudget > 0.009 ? " is-neg" : ""}">
+                <span class="wheel-corner-val">${formatMoney(totals.outOfBudget)}</span>
+                <span class="wheel-corner-lbl">out of budget</span>
+              </p>
+              <p class="wheel-corner-row${totals.remaining < 0 ? " is-neg" : ""}">
+                <span class="wheel-corner-val">${formatMoney(totals.remaining < 0 ? -totals.remaining : totals.remaining)}</span>
+                <span class="wheel-corner-lbl">${totals.remaining < 0 ? "over-Budget" : "budget-left"}</span>
+              </p>
+            </div>`
+            }
           </div>
         </div>
-        <button type="button" class="btn btn-primary btn-purchase" data-buy>I purchased</button>
+        <button type="button" class="btn btn-primary btn-purchase" data-buy>${
+          selected?.id === EXTRA_FUNDS_ID ? "Add Funds" : "I purchased"
+        }</button>
       </div>
     </section>`;
 }
@@ -190,15 +206,22 @@ function bindWheel(el: HTMLElement): void {
 
 function amountMarkup(): string {
   const target = monthSlices().find((c) => c.id === selectedSliceId);
+  const addingFunds = target?.id === EXTRA_FUNDS_ID;
   return `
     <section class="screen screen-widget screen-widget-pad">
       <div class="screen-body">
         <header class="topbar">
           <button type="button" class="icon-btn" data-back aria-label="Back">${backChevron}</button>
-          <h1 class="topbar-title">I purchased</h1>
+          <h1 class="topbar-title">${addingFunds ? "Add Funds" : "I purchased"}</h1>
           <span class="icon-btn-spacer"></span>
         </header>
-        ${target ? `<p class="catalog-kicker">Adding to ${escapeHtml(target.name)}</p>` : ""}
+        ${
+          addingFunds
+            ? `<p class="catalog-kicker">Extra cash that landed this month</p>`
+            : target
+              ? `<p class="catalog-kicker">Adding to ${escapeHtml(target.name)}</p>`
+              : ""
+        }
         <div class="widget-stage" data-phase="amount">
           <p class="display-amount" id="pad-display">${padDisplay(pad)}</p>
           <div class="flex-spacer"></div>
@@ -207,7 +230,7 @@ function amountMarkup(): string {
         <div class="pad-actions">
           <button type="button" class="btn btn-ghost" data-back>Back</button>
           <button type="button" class="btn btn-primary" data-next ${parsePad(pad) > 0 ? "" : "disabled"}>${
-            target ? `Add to ${escapeHtml(target.name)}` : "Continue"
+            addingFunds ? "Add Funds" : target ? `Add to ${escapeHtml(target.name)}` : "Continue"
           }</button>
         </div>
       </div>
@@ -238,6 +261,11 @@ function bindAmount(el: HTMLElement): void {
       pad = "";
       amount = 0;
       phase = "wheel";
+      if (target.id === EXTRA_FUNDS_ID) {
+        await addExtraFunds(value);
+        setSelectedSlice(EXTRA_FUNDS_ID);
+        return;
+      }
       await addPurchase(target.id, value);
       setSelectedSlice(target.id);
       showToast(`Logged ${formatMoney(value)}`);

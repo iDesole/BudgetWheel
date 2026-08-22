@@ -1301,6 +1301,23 @@ input {
   margin: 10px 0 4px;
 }
 
+.graph-stat-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.graph-stat-stack .graph-stat {
+  flex: 1;
+}
+
+.graph-detail-stats.is-totals > .graph-stat {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
 .graph-stat {
   background: var(--surface-3);
   border-radius: 12px;
@@ -1455,6 +1472,48 @@ input {
   left: 0;
 }
 
+.wheel-corner-totals {
+  position: absolute;
+  left: 2%;
+  bottom: calc(6% + 48px);
+  z-index: 3;
+  max-width: 38%;
+  pointer-events: none;
+  text-align: left;
+}
+
+.wheel-corner-row {
+  margin: 0 0 6px;
+  line-height: 1.15;
+}
+
+.wheel-corner-row:last-child {
+  margin-bottom: 0;
+}
+
+.wheel-corner-val {
+  display: block;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  font-size: 0.82rem;
+  color: var(--on);
+}
+
+.wheel-corner-row.is-neg .wheel-corner-val {
+  color: var(--error);
+}
+
+.wheel-corner-lbl {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-soft);
+}
+
 .wheel-cycle-btn.is-right {
   right: 0;
 }
@@ -1591,6 +1650,12 @@ input {
   height: 44px;
   margin: -8px -8px -8px 0;
   color: var(--error);
+  position: relative;
+  z-index: 2;
+}
+
+.activity-del svg {
+  pointer-events: none;
 }
 
 .slice-card-top {
