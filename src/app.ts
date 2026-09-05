@@ -17,7 +17,10 @@ import {
 import { renderCategoryActivity, renderHistoryPeriod, renderHome, renderPastQuarter, renderPurchaseAmount, renderPurchaseCategory, renderSettings } from "./screens/main.ts";
 import { renderWidget } from "./screens/widget.ts";
 import { isWidgetPath } from "./lib/widget.ts";
-import { screen, subscribe, toastMessage } from "./store.ts";
+import { applyTheme, watchSystemTheme } from "./lib/theme.ts";
+import { screen, state, subscribe, toastMessage, tourStep } from "./store.ts";
+import { mountReviewPrompt } from "./ui/review-prompt.ts";
+import { mountTour } from "./ui/tour.ts";
 import { fitWheelCenter } from "./ui/wheel.ts";
 
 const root = document.querySelector<HTMLDivElement>("#app");
@@ -136,8 +139,10 @@ function paint(): void {
   const viewId = isWidgetPath() ? "widget" : screen.id;
   const entering = viewId !== lastScreenId && viewId !== "widget";
   const section = view.querySelector(".screen");
-  if (section && entering) section.classList.add("screen-enter");
+  if (section && entering && tourStep == null) section.classList.add("screen-enter");
 
+  const keepTour = root.querySelector<HTMLElement>(".tour-root");
+  const sameTour = Boolean(keepTour && tourStep != null && keepTour.dataset.step === String(tourStep));
   root.replaceChildren(view);
   if (toastMessage) {
     const toast = document.createElement("div");
@@ -145,13 +150,23 @@ function paint(): void {
     toast.textContent = toastMessage;
     root.append(toast);
   }
+  if (sameTour && keepTour) root.append(keepTour);
 
-  const saved = !entering ? scrollPos.get(viewId) : undefined;
-  restoreScroll(root, saved);
+  // The tour scrolls Settings rows itself. Restoring the last paint would
+  // leave the hole sitting on the previous row (usually Add Income).
+  const touring = tourStep != null;
+  const saved = !entering && !touring ? scrollPos.get(viewId) : undefined;
+  if (saved) restoreScroll(root, saved);
+  if (!isWidgetPath()) {
+    mountTour(root);
+    mountReviewPrompt(root);
+  }
   requestAnimationFrame(() => {
     fitWheelCenter(root);
-    restoreScroll(root, saved);
-    requestAnimationFrame(() => restoreScroll(root, saved));
+    if (saved) {
+      restoreScroll(root, saved);
+      requestAnimationFrame(() => restoreScroll(root, saved));
+    }
   });
   lastScreenId = viewId;
   document.title = isWidgetPath() ? "Add a purchase · Budget Wheel" : "Budget Wheel";
@@ -159,6 +174,11 @@ function paint(): void {
 }
 
 export function startApp(): void {
+  applyTheme(state.theme);
+  watchSystemTheme(
+    () => state.theme,
+    () => applyTheme(state.theme),
+  );
   subscribe(paint);
   paint();
 }

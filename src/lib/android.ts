@@ -5,9 +5,11 @@
  * persist() calls pushBudgetToAndroid with baseUpdatedAt = the stamp before this
  * write, so native mergeBudgetJson can keep purchases the widget logged while
  * the WebView was saving. pullBudgetFromAndroid is the other direction.
+ * Extra JS methods: saveDownload, openPlayStore, setChrome, pinWidget.
  */
 import { getCachedUser, getToken } from "../auth.ts";
 import { sanitizeState } from "./sanitize.ts";
+import { addWidgetToHomeScreen } from "./widget.ts";
 import type { PersistedState } from "../types.ts";
 
 interface AndroidBridge {
@@ -15,6 +17,9 @@ interface AndroidBridge {
   readBudget(): string;
   notifyWidgets(): void;
   saveDownload?(filename: string, mime: string, base64: string): string;
+  openPlayStore?(): void;
+  setChrome?(theme: string): void;
+  pinWidget?(): string;
 }
 
 function bridge(): AndroidBridge | null {
@@ -43,6 +48,39 @@ export function pushBudgetToAndroid(state: PersistedState, baseUpdatedAt = state
   } catch {
     /* running in a browser, not the Android app */
   }
+}
+
+const PLAY_URL = "https://play.google.com/store/apps/details?id=com.budgetwheel.app";
+
+export function openPlayStore(): void {
+  const native = bridge();
+  if (native?.openPlayStore) {
+    try {
+      native.openPlayStore();
+      return;
+    } catch {
+      /* fall through to the public listing */
+    }
+  }
+  try {
+    window.open(PLAY_URL, "_blank", "noopener");
+  } catch {
+    window.location.assign(PLAY_URL);
+  }
+}
+
+export async function pinHomeWidget(): Promise<"pinned" | "manual"> {
+  const native = bridge();
+  if (native?.pinWidget) {
+    try {
+      const result = native.pinWidget();
+      if (result === "ok") return "pinned";
+    } catch {
+      /* older APK without pinWidget */
+    }
+  }
+  const web = await addWidgetToHomeScreen();
+  return web === "prompted" ? "pinned" : "manual";
 }
 
 export function pullBudgetFromAndroid(): PersistedState | null {

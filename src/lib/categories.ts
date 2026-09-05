@@ -128,6 +128,14 @@ export const EXTRA_FUNDS_NAME = "Extra Funds";
 export const NOT_IN_BUDGET_ID = "cat_notinbudget";
 export const EMERGENCY_ID = "cat_emergency";
 
+export function isFundsIn(tx: Pick<Transaction, "kind">): boolean {
+  return tx.kind === "in";
+}
+
+export function extraFundsAdded(tx: Pick<Transaction, "kind" | "categoryId" | "amount">): number {
+  return tx.kind === "in" && tx.categoryId === EXTRA_FUNDS_ID ? tx.amount : 0;
+}
+
 export function canHideCategory(id: string): boolean {
   return id !== EXTRA_FUNDS_ID && id !== NOT_IN_BUDGET_ID && id !== EMERGENCY_ID;
 }
@@ -142,18 +150,60 @@ export function isOutOfBudgetSpend(id: string, envelope: number): boolean {
   return id !== EXTRA_FUNDS_ID && envelope <= 0.009;
 }
 
-/** Extra Funds is leftover income, never budget spending. */
+/** Out-of-budget spend (and Extra Funds purchases) comes out of the Extra Funds pool. */
+export function extraFundsLostFromSlices(
+  slices: Array<{ id: string; envelope: number; spent: number }>,
+): number {
+  let extraOut = 0;
+  let oob = 0;
+  for (const s of slices) {
+    if (s.id === EXTRA_FUNDS_ID) extraOut += s.spent;
+    else if (isOutOfBudgetSpend(s.id, s.envelope)) oob += s.spent;
+  }
+  return extraOut + oob;
+}
+
+/** Extra Funds spent/remaining = the pool after out-of-budget draw. */
+export function withExtraFundsPool<T extends { id: string; envelope: number; spent: number; remaining: number }>(
+  slices: T[],
+): T[] {
+  const lost = extraFundsLostFromSlices(slices);
+  return slices.map((s) =>
+    s.id === EXTRA_FUNDS_ID ? { ...s, spent: lost, remaining: s.envelope - lost } : s,
+  );
+}
+
+export function extraFundsCardStats(
+  extra: { envelope: number; spent: number },
+  addedFunds: number,
+): { monthFunds: number; addedFunds: number; fundsLost: number; remaining: number } {
+  const monthFunds = Math.max(0, Math.round((extra.envelope - addedFunds) * 100) / 100);
+  return {
+    monthFunds,
+    addedFunds,
+    fundsLost: extra.spent,
+    remaining: extra.envelope - extra.spent,
+  };
+}
+
+/** Extra Funds is leftover income, never budget spending. Spent includes out-of-budget. */
 export function budgetSpendTotals(
   slices: Array<{ id: string; envelope: number; spent: number; budgeted?: number }>,
 ): { envelope: number; spent: number; outOfBudget: number; remaining: number; budgeted: number } {
   const assigned = slices.filter((s) => isAssignedBudget(s.id, s.envelope));
   const envelope = assigned.reduce((sum, c) => sum + c.envelope, 0);
-  const spent = assigned.reduce((sum, c) => sum + c.spent, 0);
+  const assignedSpend = assigned.reduce((sum, c) => sum + c.spent, 0);
   const outOfBudget = slices
     .filter((s) => isOutOfBudgetSpend(s.id, s.envelope))
     .reduce((sum, c) => sum + c.spent, 0);
   const budgeted = assigned.reduce((sum, c) => sum + (c.budgeted ?? c.envelope), 0);
-  return { envelope, spent, outOfBudget, remaining: envelope - spent, budgeted };
+  return {
+    envelope,
+    spent: assignedSpend + outOfBudget,
+    outOfBudget,
+    remaining: envelope - assignedSpend,
+    budgeted,
+  };
 }
 
 export function syncExtraFunds(categories: Category[], monthlyIncome: number): Category[] {

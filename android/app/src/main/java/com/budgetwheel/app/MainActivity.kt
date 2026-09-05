@@ -1,9 +1,17 @@
 package com.budgetwheel.app
 
 import android.annotation.SuppressLint
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Color
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Looper
+import android.view.View
+import android.view.WindowInsetsController
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -18,7 +26,8 @@ import com.budgetwheel.app.widget.WheelWidgetProvider
 /**
  * Hosts the Vite app in a local WebView and keeps the home-screen widget live.
  *
- * Bridge: writeBudget / readBudget / notifyWidgets / saveDownload.
+ * Bridge: writeBudget / readBudget / notifyWidgets / saveDownload /
+ * openPlayStore / setChrome / pinWidget.
  * JS persist writes JSON; [BudgetStore.mergeBudgetJson] keeps widget purchases.
  * The widget refreshes after every budget write, on resume, and when prefs change.
  * No INTERNET — assets load from the APK via WebViewAssetLoader.
@@ -143,6 +152,65 @@ class MainActivity : AppCompatActivity() {
             } catch (err: Exception) {
                 err.message ?: "Could not save the file."
             }
+        }
+
+        @JavascriptInterface
+        fun openPlayStore() {
+            runOnUiThread {
+                val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.budgetwheel.app"))
+                market.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try {
+                    startActivity(market)
+                } catch (_: Exception) {
+                    val web = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=com.budgetwheel.app"),
+                    )
+                    web.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(web)
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun setChrome(theme: String) {
+            runOnUiThread { applyChrome(theme == "light") }
+        }
+
+        @JavascriptInterface
+        fun pinWidget(): String {
+            val mgr = AppWidgetManager.getInstance(this@MainActivity)
+            if (!mgr.isRequestPinAppWidgetSupported) return "unsupported"
+            runOnUiThread {
+                mgr.requestPinAppWidget(
+                    ComponentName(this@MainActivity, WheelWidgetProvider::class.java),
+                    null,
+                    null,
+                )
+            }
+            return "ok"
+        }
+    }
+
+    private fun applyChrome(light: Boolean) {
+        val color = if (light) Color.parseColor("#F3EFE6") else Color.parseColor("#0D0C10")
+        window.statusBarColor = color
+        window.navigationBarColor = color
+        if (Build.VERSION.SDK_INT >= 30) {
+            val flags =
+                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(if (light) flags else 0, flags)
+        } else {
+            @Suppress("DEPRECATION")
+            val decor = window.decorView
+            var vis = decor.systemUiVisibility
+            vis = if (light) {
+                vis or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            } else {
+                vis and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+            }
+            decor.systemUiVisibility = vis
         }
     }
 

@@ -12,15 +12,14 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-/** Keep ring math in lockstep with src/ui/wheel.ts. Large overspend wraps one income per exterior ring. */
+/** Keep ring math in lockstep with src/ui/wheel.ts. One ring; 360° is the sum of slice sizes. */
 object WheelRenderer {
     private const val VIEW = 320f
-    private const val MAX_R = 144f
     private const val HOLE = 84f
-    private const val PREFERRED_MAIN = 64f
-    private const val PREFERRED_OVER = 32f
-    private const val RING_GAP = 2f
-    private const val MAX_LAYERS = 8
+    private const val RING = 64f
+    private const val SEAM = 0.7f
+    private const val FULL = 359.9f
+    private const val EPS = 0.009
     private val PALETTE = arrayOf(
         "#ED0A3F", "#FD0E35", "#C62D42", "#CA3435", "#B94E48", "#FF3F34", "#FE6F5E",
         "#FF7034", "#FF8833", "#FFB97B", "#FFAE42", "#FCD667", "#FED85D", "#FBE870",
@@ -46,16 +45,14 @@ object WheelRenderer {
     private data class Rings(
         val hole: Float,
         val mainOuter: Float,
-        val overThick: Float,
-        val gap: Float,
     )
 
     fun draw(
         slices: List<BudgetStore.Slice>,
-        income: Double,
         sizePx: Int,
         center: Center,
         selectedId: String? = null,
+        showCenter: Boolean = true,
     ): Bitmap {
         val size = max(200, sizePx)
         val scale = size / VIEW
@@ -65,7 +62,7 @@ object WheelRenderer {
         canvas.translate(pad.toFloat(), pad.toFloat())
 
         val wheel = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        drawWheel(Canvas(wheel), slices, income.toFloat().coerceAtLeast(0f), size, scale, selectedId)
+        drawWheel(Canvas(wheel), slices, size, scale, selectedId)
 
         val shadow = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         shadow.isFilterBitmap = true
@@ -74,25 +71,24 @@ object WheelRenderer {
         canvas.drawBitmap(wheel, 0f, 0f, shadow)
         wheel.recycle()
 
-        drawCenter(canvas, size, scale, center)
+        if (showCenter) drawCenter(canvas, size, scale, center)
         return bmp
     }
 
     private fun drawWheel(
         canvas: Canvas,
         slices: List<BudgetStore.Slice>,
-        income: Float,
         size: Int,
         scale: Float,
         selectedId: String?,
     ) {
         val cx = size / 2f
         val cy = size / 2f
-        val envelopeTotal = slices.sumOf { max(0.0, it.envelope) }.toFloat()
-        val spentTotal = slices.sumOf { max(0.0, it.spent) }.toFloat()
+        val painted = paintOutOfBudget(slices)
+        val weighted = sliceWeights(painted)
+        val rings = layoutRing(scale)
 
-        if (slices.isEmpty() || (income <= 0f && envelopeTotal <= 0f && spentTotal <= 0f)) {
-            val rings = layoutRings(0, scale)
+        if (weighted.isEmpty()) {
             val ring = Paint(Paint.ANTI_ALIAS_FLAG)
             ring.style = Paint.Style.STROKE
             ring.strokeWidth = rings.mainOuter - rings.hole
@@ -101,86 +97,16 @@ object WheelRenderer {
             return
         }
 
-        val painted = paintOutOfBudget(slices)
-        val cores = coreWeights(painted)
-        val overflow = painted.mapNotNull { s ->
-            val extra = overflowWeight(s)
-            if (extra > 0.009) Weighted(s, extra.toFloat()) else null
-        }
-        val budgetTotal = cores.sumOf { it.weight.toDouble() }.toFloat()
-        val overflowTotal = overflow.sumOf { it.weight.toDouble() }.toFloat()
-        val unit = if (income > 0.009f) income else max(budgetTotal, overflowTotal)
-        val coreLayers = layersByCost(cores, unit)
-        val assignedOver = coreLayers.drop(1)
-        val placed = placeSpendOverflow(
-            coreLayers.firstOrNull().orEmpty(),
-            min(budgetTotal, unit),
-            overflow,
-            unit,
-        )
-        val overLayers = (assignedOver + placed.second).take(MAX_LAYERS)
-        val rings = layoutRings(overLayers.size, scale)
-
-        if (placed.first.isNotEmpty()) {
-            drawRing(canvas, placed.first, rings.hole, rings.mainOuter, unit, cx, cy, selectedId, scale)
-        }
-        overLayers.forEachIndexed { index, layer ->
-            val r0 = rings.mainOuter + rings.gap + index * (rings.overThick + rings.gap)
-            drawRing(canvas, layer, r0, r0 + rings.overThick, unit, cx, cy, selectedId, scale)
-        }
+        drawRing(canvas, weighted, rings.hole, rings.mainOuter, cx, cy, selectedId, scale)
     }
 
-    private fun layoutRings(overCount: Int, scale: Float): Rings {
+    private fun layoutRing(scale: Float): Rings {
         val hole = HOLE * scale
-        val gap = RING_GAP * scale
-        val needed = hole + PREFERRED_MAIN * scale + overCount * (PREFERRED_OVER * scale + gap)
-        if (overCount <= 0 || needed <= MAX_R * scale) {
-            return Rings(hole, hole + PREFERRED_MAIN * scale, PREFERRED_OVER * scale, gap)
-        }
-        val remain = MAX_R * scale - hole
-        val mainThick = max(28f * scale, (remain - overCount * gap) / (1f + overCount / 2f))
-        return Rings(hole, hole + mainThick, mainThick / 2f, gap)
+        return Rings(hole, hole + RING * scale)
     }
 
     private fun isOutOfBudget(slice: BudgetStore.Slice): Boolean {
-        return slice.id != BudgetStore.EXTRA_FUNDS_ID && slice.envelope <= 0.009 && slice.spent > 0.009
-    }
-
-    private fun overflowWeight(slice: BudgetStore.Slice): Double {
-        return if (slice.envelope <= 0.009) max(0.0, slice.spent) else max(0.0, slice.spent - slice.envelope)
-    }
-
-    private fun placeSpendOverflow(
-        inner: List<Weighted>,
-        assignedOnInner: Float,
-        overflow: List<Weighted>,
-        unit: Float,
-    ): Pair<List<Weighted>, List<List<Weighted>>> {
-        if (overflow.isEmpty()) return inner to emptyList()
-        val room = max(0f, unit - assignedOnInner)
-        val leftover = ArrayList<Weighted>()
-        val nextInner = ArrayList(inner)
-        if (room > 0.009f) {
-            var left = room
-            for (item in overflow) {
-                if (left <= 0.009f) {
-                    leftover.add(item)
-                    continue
-                }
-                val take = min(item.weight, left)
-                nextInner.add(Weighted(item.slice, take))
-                left -= take
-                if (item.weight - take > 0.009f) leftover.add(Weighted(item.slice, item.weight - take))
-            }
-        } else {
-            leftover.addAll(overflow)
-        }
-        val over = if (leftover.isEmpty()) {
-            emptyList()
-        } else {
-            splitLayers(leftover.sortedByDescending { it.weight }, unit).take(MAX_LAYERS)
-        }
-        return nextInner to over
+        return slice.id != BudgetStore.EXTRA_FUNDS_ID && slice.envelope <= EPS && slice.spent > EPS
     }
 
     private fun paintOutOfBudget(slices: List<BudgetStore.Slice>): List<BudgetStore.Slice> {
@@ -205,47 +131,15 @@ object WheelRenderer {
 
     private fun unusedColor(used: Set<String>): String = unusedDisplayColor(used)
 
-    private fun coreWeights(slices: List<BudgetStore.Slice>): List<Weighted> {
-        val unbudgeted = slices
-            .filter { isOutOfBudget(it) }
-            .sumOf { max(0.0, it.spent) }
+    private fun sliceWeights(slices: List<BudgetStore.Slice>): List<Weighted> {
         return slices.mapNotNull { s ->
-            val weight = when {
-                s.id == BudgetStore.EXTRA_FUNDS_ID -> max(0.0, s.envelope - unbudgeted)
-                s.envelope > 0.009 -> s.envelope
-                else -> 0.0
+            val weight = if (s.id == BudgetStore.EXTRA_FUNDS_ID) {
+                max(0.0, s.envelope - s.spent)
+            } else {
+                max(0.0, max(s.envelope, s.spent))
             }
-            if (weight > 0.009) Weighted(s, weight.toFloat()) else null
+            if (weight > EPS) Weighted(s, weight.toFloat()) else null
         }
-    }
-
-    private fun splitLayers(sized: List<Weighted>, unit: Float): List<List<Weighted>> {
-        if (unit <= 0.009f) return if (sized.isEmpty()) emptyList() else listOf(sized)
-        val layers = ArrayList<ArrayList<Weighted>>()
-        layers.add(ArrayList())
-        var room = unit
-        for (slice in sized) {
-            var left = slice.weight
-            while (left > 0.009f) {
-                if (room <= 0.009f) {
-                    layers.add(ArrayList())
-                    room = unit
-                }
-                val take = min(left, room)
-                layers.last().add(Weighted(slice.slice, take))
-                left -= take
-                room -= take
-            }
-        }
-        return layers.filter { it.isNotEmpty() }
-    }
-
-    private fun layersByCost(items: List<Weighted>, unit: Float): List<List<Weighted>> {
-        if (items.isEmpty()) return emptyList()
-        if (unit <= 0.009f) return listOf(items)
-        val total = items.sumOf { it.weight.toDouble() }.toFloat()
-        if (total <= unit + 0.009f) return listOf(items)
-        return splitLayers(items.sortedBy { it.weight }, unit)
     }
 
     private fun drawRing(
@@ -253,7 +147,6 @@ object WheelRenderer {
         items: List<Weighted>,
         r0: Float,
         r1: Float,
-        fullCircleAt: Float,
         cx: Float,
         cy: Float,
         selectedId: String?,
@@ -261,15 +154,16 @@ object WheelRenderer {
     ) {
         val total = items.sumOf { it.weight.toDouble() }.toFloat()
         if (total <= 0f) return
-        val circleAt = if (fullCircleAt > 0f) fullCircleAt else total
         var angle = 0f
-        val seam = if (items.size > 1) 0.7f else 0f
+        val seam = if (items.size > 1) SEAM else 0f
         val later = ArrayList<PathPaint>()
         val first = ArrayList<PathPaint>()
         for (item in items) {
-            val sweep = min(359.9f, item.weight / circleAt * 360f)
+            if (angle >= FULL) break
+            val sweep = min(FULL - angle, item.weight / total * 360f)
+            val gap = if (sweep > seam) seam else 0f
             val a0 = angle
-            val a1 = angle + sweep - seam
+            val a1 = angle + sweep - gap
             angle += sweep
             if (a1 <= a0) continue
             val selected = selectedId != null && selectedId == item.slice.id
@@ -299,7 +193,7 @@ object WheelRenderer {
     private fun donutPath(cx: Float, cy: Float, r0: Float, r1: Float, a0: Float, a1: Float): Path {
         val span = a1 - a0
         val path = Path()
-        if (span >= 359.9f) {
+        if (span >= FULL) {
             path.addCircle(cx, cy, r1, Path.Direction.CW)
             path.addCircle(cx, cy, r0, Path.Direction.CCW)
             path.fillType = Path.FillType.EVEN_ODD
@@ -373,10 +267,11 @@ object WheelRenderer {
     }
 
     private fun splitSub(sub: String): List<String> {
-        val marker = " spent of "
-        val at = sub.indexOf(marker)
-        if (at <= 0) return listOf(sub)
-        return listOf(sub.substring(0, at) + " spent", "of " + sub.substring(at + marker.length))
+        listOf(" spent of " to " spent", " lost of " to " lost").forEach { (marker, verb) ->
+            val at = sub.indexOf(marker)
+            if (at > 0) return listOf(sub.substring(0, at) + verb, "of " + sub.substring(at + marker.length))
+        }
+        return listOf(sub)
     }
 
     private fun paint(color: Int, typeface: Typeface): Paint {

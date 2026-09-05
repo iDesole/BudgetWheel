@@ -19,6 +19,8 @@
  */
 
 import type { Category, HistoryScale, SnapshotCategory, Transaction, WheelSnapshot } from "../types.ts";
+import { EXTRA_FUNDS_ID, extraFundsAdded, isFundsIn, withExtraFundsPool } from "./categories.ts";
+import { clampMoney } from "./money.ts";
 import {
   compareMonthId,
   compareQuarterId,
@@ -98,9 +100,14 @@ export function txsInSnapshot(snap: WheelSnapshot, txs: Transaction[]): Transact
 export function spendFromTransactions(txs: Transaction[]): Map<string, number> {
   const spent = new Map<string, number>();
   for (const tx of txs) {
+    if (isFundsIn(tx)) continue;
     spent.set(tx.categoryId, (spent.get(tx.categoryId) ?? 0) + tx.amount);
   }
   return spent;
+}
+
+export function extraInFromTransactions(txs: Transaction[]): number {
+  return txs.reduce((sum, tx) => sum + extraFundsAdded(tx), 0);
 }
 
 export function spendFromSnapshots(snaps: WheelSnapshot[]): Map<string, number> {
@@ -128,14 +135,21 @@ function snapshotHasSpend(snap: WheelSnapshot): boolean {
 // Build one frozen archive card
 // ---------------------------------------------------------------------------
 
-function snapshotCategories(spent: Map<string, number>, categories: Category[]): SnapshotCategory[] {
+function snapshotCategories(
+  spent: Map<string, number>,
+  categories: Category[],
+  extraIn: number,
+  periodMonths: number,
+): SnapshotCategory[] {
+  const extraMonthly = periodMonths > 0 ? extraIn / periodMonths : extraIn;
   return categories
-    .filter((c) => c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0)
+    .filter((c) => c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0 || (c.id === EXTRA_FUNDS_ID && extraIn > 0.009))
     .map((c) => ({
       id: c.id,
       name: c.name,
       color: c.color,
-      budgetedMonthly: c.budgeted,
+      budgetedMonthly:
+        c.id === EXTRA_FUNDS_ID ? clampMoney(c.budgeted + extraMonthly) : c.budgeted,
       spent: spent.get(c.id) ?? 0,
     }));
 }
@@ -150,7 +164,9 @@ export function snapshotFromSpend(
   spent: Map<string, number>,
   income: number,
   categories: Category[],
+  extraIn = 0,
 ): WheelSnapshot {
+  const extraMonthly = periodMonths > 0 ? extraIn / periodMonths : extraIn;
   return {
     id,
     scale,
@@ -159,8 +175,8 @@ export function snapshotFromSpend(
     startIso,
     endIso,
     periodMonths,
-    monthlyIncome: income,
-    categories: snapshotCategories(spent, categories),
+    monthlyIncome: clampMoney(income + extraMonthly),
+    categories: snapshotCategories(spent, categories, extraIn, periodMonths),
     capturedAt: Date.now(),
   };
 }
@@ -185,6 +201,7 @@ export function makeMonthSnapshot(
 ): WheelSnapshot | null {
   const bounds = monthBounds(monthId);
   if (!bounds) return null;
+  const monthTxs = txsInMonth(txs, monthId);
   return snapshotFromSpend(
     monthId,
     "month",
@@ -192,9 +209,10 @@ export function makeMonthSnapshot(
     bounds.startIso,
     bounds.endIso,
     1,
-    spendFromTransactions(txsInMonth(txs, monthId)),
+    spendFromTransactions(monthTxs),
     income,
     categories,
+    extraInFromTransactions(monthTxs),
   );
 }
 
@@ -212,7 +230,8 @@ export function makeQuarterSnapshot(
   const parsed = parseQuarterId(quarterId);
   if (!parsed) return null;
   const months = monthHistory.filter((item) => quarterIdFromMonthId(item.id) === quarterId);
-  const spent = months.length ? spendFromSnapshots(months) : spendFromTransactions(txsInQuarter(txs, quarterId));
+  const quarterTxs = txsInQuarter(txs, quarterId);
+  const spent = months.length ? spendFromSnapshots(months) : spendFromTransactions(quarterTxs);
   return snapshotFromSpend(
     quarterId,
     "quarter",
@@ -223,6 +242,7 @@ export function makeQuarterSnapshot(
     spent,
     income,
     categories,
+    extraInFromTransactions(quarterTxs),
   );
 }
 
@@ -239,13 +259,25 @@ export function makeYearSnapshot(
   const bounds = yearBounds(year);
   const quarters = quarterHistory.filter((item) => quarterYear(item.id) === year);
   const months = monthHistory.filter((item) => parseMonthId(item.id)?.year === year);
+  const yearTxs = txsInYear(txs, year);
   const spent = quarters.length
     ? spendFromSnapshots(quarters)
     : months.length
       ? spendFromSnapshots(months)
-      : spendFromTransactions(txsInYear(txs, year));
-  if (!hasSpend(spent) && !quarters.length && !months.length) return null;
-  return snapshotFromSpend(yearId, "year", yearId, bounds.startIso, bounds.endIso, 12, spent, income, categories);
+      : spendFromTransactions(yearTxs);
+  if (!hasSpend(spent) && !quarters.length && !months.length && extraInFromTransactions(yearTxs) <= 0.009) return null;
+  return snapshotFromSpend(
+    yearId,
+    "year",
+    yearId,
+    bounds.startIso,
+    bounds.endIso,
+    12,
+    spent,
+    income,
+    categories,
+    extraInFromTransactions(yearTxs),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +310,7 @@ export function snapshotsForScale(
 // ---------------------------------------------------------------------------
 
 export function historySlices(snap: WheelSnapshot, liveCategories: Category[]): HistorySlice[] {
-  return snap.categories
+  const rows = snap.categories
     .map((c) => {
       const current = liveCategories.find((item) => item.id === c.id);
       const envelope = c.budgetedMonthly * snap.periodMonths;
@@ -296,6 +328,7 @@ export function historySlices(snap: WheelSnapshot, liveCategories: Category[]): 
       };
     })
     .filter((c) => c.envelope > 0.009 || c.spent > 0.009);
+  return withExtraFundsPool(rows);
 }
 
 export function snapshotSpentTotal(snap: WheelSnapshot): number {
@@ -421,6 +454,19 @@ export function deleteHistory(
 // ---------------------------------------------------------------------------
 
 function subtractFromSnap(snap: WheelSnapshot, tx: Transaction): WheelSnapshot {
+  const months = Math.max(1, snap.periodMonths);
+  const monthly = tx.amount / months;
+  if (isFundsIn(tx)) {
+    return {
+      ...snap,
+      monthlyIncome: clampMoney(snap.monthlyIncome - monthly),
+      categories: snap.categories.map((cat) =>
+        cat.id === EXTRA_FUNDS_ID
+          ? { ...cat, budgetedMonthly: clampMoney(cat.budgetedMonthly - monthly) }
+          : cat,
+      ),
+    };
+  }
   return {
     ...snap,
     categories: snap.categories.map((cat) =>

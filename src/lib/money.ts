@@ -8,6 +8,11 @@ export function formatMoney(amount: number): string {
   return amount < 0 ? `−${formatted}` : formatted;
 }
 
+/** Extra Funds adds show `+$…`; purchases show `−$…`. */
+export function formatTxMoney(amount: number, kind?: "in" | "out"): string {
+  return kind === "in" ? `+${formatMoney(amount)}` : `−${formatMoney(amount)}`;
+}
+
 export function formatPct(value: number, digits = 0): string {
   const n = Number.isFinite(value) ? value : 0;
   return `${n.toFixed(digits)}%`;

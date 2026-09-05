@@ -9,24 +9,24 @@ Budget Wheel
 ================================================================
 Short description (80)
 ================================================================
-See where every dollar goes. On-device budgeting with a live wheel and widget.
+Privacy-first budgeting and expense tracking. Spending wheel, graph, and widget.
 
-Character count: 78
+Character count: 80
 
 ================================================================
 Full description
 ================================================================
-Budget Wheel shows where every dollar of your take-home pay goes.
+Budget Wheel is hands-on financial planning without a bank login. You log income and expenses yourself. Nothing is imported, and your data stays on this device.
 
-Start with real income. Choose salary or hourly, add your state, and get a monthly take-home estimate you can confirm or adjust. Then give each category a dollar amount or a percent of income. Anything you do not assign becomes Extra Funds.
+See where every dollar of take-home pay goes on a live spending wheel. Each slice is a category. Tap a slice to review it, add a purchase, or tidy the name and color. Prefer exact bars? Switch to a graph of the same month.
 
-The home screen is a wheel. 100% is this month’s income. Tap a slice to see what you spent. Tap I purchased, enter the amount, and pick a category. If a slice is already selected, the purchase goes straight there.
+Start with real income. Choose salary or hourly, add your state, and get a monthly take-home estimate you can confirm or adjust. Add a second income, side hustle, or one-off payday in Settings so the wheel knows what you actually have to spend.
 
-Need a clearer view? Switch between the wheel and a bar graph. Change Monthly, Quarterly, or Yearly without rewriting the budget you set.
+Give each category a dollar amount or a percent of income. Anything you do not assign becomes Extra Funds. Log spending with I purchased. Spending starts over on the 1st.
 
-The home-screen widget matches the app. It shows this month’s wheel or graph and lets you log a purchase without opening Budget Wheel. The app and widget stay in sync.
+Pin a home-screen widget — compact 2×2 or wider 4×2 — to see what’s left this month without opening the app. Dark is the default; Light and System live in Settings.
 
-Spending starts over on the 1st. Closed months, quarters, and years stay in Spending history on this device. Download a PDF or delete history when you want.
+After a month ends, download your wheel: a picture plus a CSV you own. Files stay on the device unless you share them. Closed months, quarters, and years stay in Spending history.
 
 Your information stays on this device. Budget Wheel does not collect, transmit, or sell your personal or financial information. There is no account and no server. Uninstalling the app erases the budget on that device.
 

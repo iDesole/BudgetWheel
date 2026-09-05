@@ -16,7 +16,7 @@ import {
   state,
   selectedSliceId,
 } from "../store.ts";
-import { EXTRA_FUNDS_ID, budgetSpendTotals } from "../lib/categories.ts";
+import { EXTRA_FUNDS_ID, budgetSpendTotals, extraFundsAdded, isFundsIn, withExtraFundsPool } from "../lib/categories.ts";
 import { backChevron } from "../ui/icons.ts";
 import { bindNumpad, numpadMarkup } from "../ui/numpad.ts";
 import { wheelCenterMarkup, wheelSvg } from "../ui/wheel.ts";
@@ -31,17 +31,34 @@ let logging = false;
 function monthSlices() {
   const now = new Date();
   const spent = new Map<string, number>();
+  let extraIn = 0;
   for (const tx of state.transactions) {
     const at = new Date(tx.createdAt);
     if (at.getFullYear() !== now.getFullYear() || at.getMonth() !== now.getMonth()) continue;
+    extraIn += extraFundsAdded(tx);
+    if (isFundsIn(tx)) continue;
     spent.set(tx.categoryId, (spent.get(tx.categoryId) ?? 0) + tx.amount);
   }
-  return sortedCategories()
-    .filter((c) => !c.hidden && (c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0))
-    .map((c) => {
-      const used = spent.get(c.id) ?? 0;
-      return { ...c, spent: used, envelope: c.budgeted, remaining: c.budgeted - used };
-    });
+  return withExtraFundsPool(
+    sortedCategories()
+      .filter((c) => !c.hidden && (c.id === EXTRA_FUNDS_ID || c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0))
+      .map((c) => {
+        const used = spent.get(c.id) ?? 0;
+        const envelope = c.id === EXTRA_FUNDS_ID ? c.budgeted + extraIn : c.budgeted;
+        return { ...c, spent: used, envelope, remaining: envelope - used };
+      }),
+  );
+}
+
+function monthIncome(): number {
+  const now = new Date();
+  let extraIn = 0;
+  for (const tx of state.transactions) {
+    const at = new Date(tx.createdAt);
+    if (at.getFullYear() !== now.getFullYear() || at.getMonth() !== now.getMonth()) continue;
+    extraIn += extraFundsAdded(tx);
+  }
+  return (state.income?.monthlyTakeHome ?? 0) + extraIn;
 }
 
 function goPhase(next: WidgetPhase): void {
@@ -145,7 +162,7 @@ function wheelMarkup(): string {
   const slices = monthSlices();
   const selected = slices.find((s) => s.id === selectedSliceId) ?? null;
   const totals = budgetSpendTotals(slices);
-  const periodIncome = state.income?.monthlyTakeHome ?? 0;
+  const periodIncome = monthIncome();
   const centerLabel = selected ? selected.name : "Income";
   const centerValue = selected ? selected.remaining : periodIncome;
   return `
@@ -160,28 +177,30 @@ function wheelMarkup(): string {
         </header>
         <div class="widget-stage" data-phase="wheel">
           <div class="wheel-wrap">
-            ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true, income: periodIncome })}
+            ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
             ${wheelCenterMarkup({
               label: centerLabel,
               value: formatMoney(centerValue),
               negative: centerValue < 0,
-              subPrimary: selected ? `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}` : `${formatMoney(totals.spent)} spent`,
+              subPrimary: selected
+                ? selected.id === EXTRA_FUNDS_ID
+                  ? `${formatMoney(selected.spent)} lost of ${formatMoney(selected.envelope)}`
+                  : `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}`
+                : `${formatMoney(totals.spent)} spent`,
               subSecondary: selected ? undefined : `of ${formatMoney(totals.envelope)} budget`,
             })}
-            ${
-              selected
-                ? ""
-                : `<div class="wheel-corner-totals">
-              <p class="wheel-corner-row${totals.outOfBudget > 0.009 ? " is-neg" : ""}">
-                <span class="wheel-corner-val">${formatMoney(totals.outOfBudget)}</span>
-                <span class="wheel-corner-lbl">out of budget</span>
-              </p>
-              <p class="wheel-corner-row${totals.remaining < 0 ? " is-neg" : ""}">
-                <span class="wheel-corner-val">${formatMoney(totals.remaining < 0 ? -totals.remaining : totals.remaining)}</span>
-                <span class="wheel-corner-lbl">${totals.remaining < 0 ? "over-Budget" : "budget-left"}</span>
-              </p>
-            </div>`
-            }
+            <div class="wheel-corner-totals is-oob">
+              <div class="graph-stat">
+                <span class="graph-stat-val${totals.outOfBudget > 0.009 ? " is-neg" : ""}">${formatMoney(totals.outOfBudget)}</span>
+                <span class="graph-stat-lbl">out of budget</span>
+              </div>
+            </div>
+            <div class="wheel-corner-totals is-left">
+              <div class="graph-stat">
+                <span class="graph-stat-val${totals.remaining < 0 ? " is-neg" : ""}">${formatMoney(totals.remaining < 0 ? -totals.remaining : totals.remaining)}</span>
+                <span class="graph-stat-lbl">${totals.remaining < 0 ? "over-Budget" : "budget-left"}</span>
+              </div>
+            </div>
           </div>
         </div>
         <button type="button" class="btn btn-primary btn-purchase" data-buy>${
@@ -276,7 +295,7 @@ function bindAmount(el: HTMLElement): void {
 }
 
 function categoryMarkup(): string {
-  const income = state.income?.monthlyTakeHome ?? 0;
+  const income = monthIncome();
   const cats = sortedCategories();
   const spentMap = new Map(monthSlices().map((c) => [c.id, c.spent]));
   return `

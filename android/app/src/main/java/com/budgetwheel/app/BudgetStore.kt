@@ -18,14 +18,15 @@ import kotlin.math.round
  * Sync
  *   App persist → writeBudgetJson → merge widget-only purchases → notify widgets
  *   Widget purchase → addPurchase → BudgetSync pulls the WebView
- *   Extra Funds slice → addExtraFunds (side income, leftover envelope)
+ *   Extra Funds slice → addExtraFunds (kind "in" activity, leftover envelope)
  *   mergeBudgetJson keeps widget txs whose createdAt is after the app's baseUpdatedAt
  *   jsonTime() reads JS numbers that do not fit in JSONObject.getLong
  *
  * Live numbers
  *   The home-screen widget is always this calendar month, even if the app
- *   is showing a quarter or year. 100% of the wheel is monthly take-home.
- *   Extra Funds is leftover income, never assigned budget spending.
+ *   is showing a quarter or year. The wheel is one ring sized by envelopes
+ *   (and spend when a slice is over). Extra Funds is leftover take-home,
+ *   never a second income source, never assigned budget spending.
  */
 class BudgetStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -139,6 +140,7 @@ class BudgetStore(context: Context) {
             tx.put("categoryId", categoryId)
             tx.put("amount", roundCents(amount))
             tx.put("createdAt", now)
+            tx.put("kind", "out")
             txs.put(tx)
             state.put("transactions", txs)
             state.put("updatedAt", now)
@@ -153,7 +155,7 @@ class BudgetStore(context: Context) {
         BudgetSync.notifyApp()
     }
 
-    /** Add leftover cash to Extra Funds. Same as src/store.ts addExtraFunds. */
+    /** Extra cash this month on Extra Funds. Same as src/store.ts addExtraFunds. */
     fun addExtraFunds(amount: Double) {
         synchronized(ioLock) {
             val add = roundCents(amount)
@@ -162,63 +164,19 @@ class BudgetStore(context: Context) {
             val root = JSONObject(raw)
             val state = root.optJSONObject("state") ?: root
             val income = state.optJSONObject("income") ?: return
-            val sources = income.optJSONArray("sources") ?: JSONArray()
-            if (sources.length() == 0) {
-                val primary = JSONObject()
-                primary.put("id", "inc_primary")
-                primary.put("kind", "primary")
-                primary.put("type", income.optString("type", "salary"))
-                if (income.has("salaryPeriod")) primary.put("salaryPeriod", income.optString("salaryPeriod"))
-                if (income.has("salaryAmount")) primary.put("salaryAmount", income.optDouble("salaryAmount"))
-                if (income.has("hourlyWage")) primary.put("hourlyWage", income.optDouble("hourlyWage"))
-                if (income.has("hoursPerWeek")) primary.put("hoursPerWeek", income.optDouble("hoursPerWeek"))
-                primary.put("monthlyGross", income.optDouble("monthlyGross"))
-                primary.put("monthlyTakeHome", income.optDouble("monthlyTakeHome"))
-                primary.put("estimatedTaxAnnual", income.optDouble("estimatedTaxAnnual"))
-                sources.put(primary)
-            }
-            var found = false
-            for (i in 0 until sources.length()) {
-                val source = sources.optJSONObject(i) ?: continue
-                if (source.optString("id") != ADDED_FUNDS_ID) continue
-                source.put("kind", "side")
-                source.put("type", "side")
-                source.put("monthlyTakeHome", roundCents(source.optDouble("monthlyTakeHome") + add))
-                source.put("monthlyGross", roundCents(source.optDouble("monthlyGross") + add))
-                found = true
-                break
-            }
-            if (!found) {
-                val source = JSONObject()
-                source.put("id", ADDED_FUNDS_ID)
-                source.put("kind", "side")
-                source.put("type", "side")
-                source.put("monthlyGross", add)
-                source.put("monthlyTakeHome", add)
-                source.put("estimatedTaxAnnual", 0)
-                sources.put(source)
-            }
-            income.put("sources", sources)
-            income.put("monthlyTakeHome", roundCents(income.optDouble("monthlyTakeHome") + add))
-            income.put("monthlyGross", roundCents(income.optDouble("monthlyGross") + add))
-            state.put("income", income)
-            val monthly = income.optDouble("monthlyTakeHome")
-            val cats = state.optJSONArray("categories")
-            if (cats != null) {
-                var assigned = 0.0
-                for (i in 0 until cats.length()) {
-                    val cat = cats.optJSONObject(i) ?: continue
-                    if (cat.optString("id") == EXTRA_FUNDS_ID || cat.optBoolean("hidden")) continue
-                    assigned += cat.optDouble("budgeted", 0.0)
-                }
-                for (i in 0 until cats.length()) {
-                    val cat = cats.optJSONObject(i) ?: continue
-                    if (cat.optString("id") != EXTRA_FUNDS_ID) continue
-                    cat.put("budgeted", roundCents(max(0.0, monthly - assigned)))
-                    cat.put("hidden", false)
-                }
-            }
+            peelAddedFunds(income, state)
+            val txs = state.optJSONArray("transactions") ?: JSONArray()
             val now = System.currentTimeMillis()
+            val tx = JSONObject()
+            tx.put("id", "tx_w_${now}_${(0..999_999).random()}")
+            tx.put("categoryId", EXTRA_FUNDS_ID)
+            tx.put("amount", add)
+            tx.put("createdAt", now)
+            tx.put("kind", "in")
+            txs.put(tx)
+            state.put("transactions", txs)
+            state.put("income", income)
+            syncExtraFundsLeftover(state, income)
             state.put("updatedAt", now)
             if (root.has("state")) {
                 root.put("state", state)
@@ -279,6 +237,7 @@ class BudgetStore(context: Context) {
         val state = bundle()?.state ?: return emptyList()
         val cats = state.optJSONArray("categories") ?: return emptyList()
         val spent = spentMap(state)
+        val extraIn = extraInThisMonth(state)
         val out = ArrayList<Slice>()
         for (i in 0 until cats.length()) {
             val c = cats.optJSONObject(i) ?: continue
@@ -287,6 +246,7 @@ class BudgetStore(context: Context) {
             val budgeted = c.optDouble("budgeted", 0.0)
             val used = spent[id] ?: 0.0
             if (onlyOnWheel && id != EXTRA_FUNDS_ID && budgeted <= 0.009 && used <= 0.009) continue
+            val envelope = if (id == EXTRA_FUNDS_ID) roundCents(budgeted + extraIn) else roundCents(budgeted)
             out.add(
                 Slice(
                     id = id,
@@ -294,12 +254,21 @@ class BudgetStore(context: Context) {
                     color = c.optString("color", "#F0C94D"),
                     budgeted = budgeted,
                     spent = used,
-                    envelope = roundCents(budgeted),
+                    envelope = envelope,
                     order = c.optInt("order", i),
                 ),
             )
         }
-        return out.sortedWith(compareByDescending<Slice> { it.budgeted }.thenBy { it.name.lowercase(Locale.US) })
+        return withExtraFundsPool(out).sortedWith(compareByDescending<Slice> { it.budgeted }.thenBy { it.name.lowercase(Locale.US) })
+    }
+
+    private fun withExtraFundsPool(rows: List<Slice>): List<Slice> {
+        val extraOut = rows.find { it.id == EXTRA_FUNDS_ID }?.spent ?: 0.0
+        val oob = rows.filter { it.id != EXTRA_FUNDS_ID && it.envelope <= 0.009 }.sumOf { it.spent }
+        val lost = roundCents(extraOut + oob)
+        return rows.map { row ->
+            if (row.id != EXTRA_FUNDS_ID) row else row.copy(spent = lost)
+        }
     }
 
     fun periodTitle(): String {
@@ -312,23 +281,38 @@ class BudgetStore(context: Context) {
 
     fun assignedSlices(): List<Slice> = slices().filter { it.id != EXTRA_FUNDS_ID && it.envelope > 0.009 }
 
+    fun budgetLeft(): Double {
+        val assigned = assignedSlices()
+        return roundCents(assigned.sumOf { it.envelope } - assigned.sumOf { it.spent })
+    }
+
+    fun themePref(): String = bundle()?.state?.optString("theme", "dark") ?: "dark"
+
     fun outOfBudgetSpend(): Double =
         slices().filter { it.id != EXTRA_FUNDS_ID && it.envelope <= 0.009 }.sumOf { it.spent }
+
+    /** Assigned spend plus out-of-budget. Extra Funds is not spending. */
+    fun totalSpend(): Double = roundCents(assignedSlices().sumOf { it.spent } + outOfBudgetSpend())
 
     fun wheelCenter(selectedId: String? = null): WheelRenderer.Center {
         val slices = slices()
         val selected = selectedId?.let { id -> slices.find { it.id == id } }
         if (selected != null) {
             val left = selected.envelope - selected.spent
+            val extra = selected.id == EXTRA_FUNDS_ID
             return WheelRenderer.Center(
                 label = selected.name,
                 value = money(left),
-                sub = "${money(selected.spent)} of ${money(selected.envelope)}",
+                sub = if (extra) {
+                    "${money(selected.spent)} lost of ${money(selected.envelope)}"
+                } else {
+                    "${money(selected.spent)} of ${money(selected.envelope)}"
+                },
                 negative = left < 0,
             )
         }
         val assigned = assignedSlices()
-        val spent = assigned.sumOf { it.spent }
+        val spent = totalSpend()
         val budget = assigned.sumOf { it.envelope }
         val income = income()
         return WheelRenderer.Center(
@@ -343,8 +327,16 @@ class BudgetStore(context: Context) {
         return bundle()?.state?.optJSONObject("income")?.optDouble("monthlyTakeHome", 0.0) ?: 0.0
     }
 
-    /** Monthly take-home. The widget wheel is always 100% = this month's income. */
-    fun income(): Double = monthlyIncome()
+    /** Take-home plus Extra Funds cash-in this month. Shown in the wheel center. */
+    fun income(): Double {
+        val state = bundle()?.state ?: return 0.0
+        return roundCents(monthlyIncome() + extraInThisMonth(state))
+    }
+
+    fun extraFundsAdded(): Double {
+        val state = bundle()?.state ?: return 0.0
+        return extraInThisMonth(state)
+    }
 
     companion object {
         const val PREFS = "budgetwheel"
@@ -475,11 +467,82 @@ class BudgetStore(context: Context) {
             val now = Calendar.getInstance()
             for (i in 0 until txs.length()) {
                 val tx = txs.optJSONObject(i) ?: continue
+                if (tx.optString("kind") == "in") continue
                 if (!inThisMonth(jsonTime(tx, "createdAt"), now)) continue
                 val id = tx.optString("categoryId")
                 map[id] = (map[id] ?: 0.0) + tx.optDouble("amount")
             }
             return map
+        }
+
+        private fun extraInThisMonth(state: JSONObject): Double {
+            val txs = state.optJSONArray("transactions") ?: return 0.0
+            val now = Calendar.getInstance()
+            var sum = 0.0
+            for (i in 0 until txs.length()) {
+                val tx = txs.optJSONObject(i) ?: continue
+                if (tx.optString("kind") != "in") continue
+                if (tx.optString("categoryId") != EXTRA_FUNDS_ID) continue
+                if (!inThisMonth(jsonTime(tx, "createdAt"), now)) continue
+                sum += tx.optDouble("amount")
+            }
+            return roundCents(sum)
+        }
+
+        /** Drop the retired Extra Funds income source; keep its cash as Extra Funds activity. */
+        private fun peelAddedFunds(income: JSONObject, state: JSONObject) {
+            val sources = income.optJSONArray("sources") ?: return
+            var addedAmt = 0.0
+            val next = JSONArray()
+            for (i in 0 until sources.length()) {
+                val source = sources.optJSONObject(i) ?: continue
+                if (source.optString("id") == ADDED_FUNDS_ID) {
+                    addedAmt = roundCents(source.optDouble("monthlyTakeHome"))
+                    continue
+                }
+                next.put(source)
+            }
+            if (addedAmt <= 0.009) return
+            income.put("sources", next)
+            income.put("monthlyTakeHome", roundCents(max(0.0, income.optDouble("monthlyTakeHome") - addedAmt)))
+            income.put("monthlyGross", roundCents(max(0.0, income.optDouble("monthlyGross") - addedAmt)))
+            val txs = state.optJSONArray("transactions") ?: JSONArray()
+            var existingIn = 0.0
+            for (i in 0 until txs.length()) {
+                val tx = txs.optJSONObject(i) ?: continue
+                if (tx.optString("kind") == "in" && tx.optString("categoryId") == EXTRA_FUNDS_ID) {
+                    existingIn += tx.optDouble("amount")
+                }
+            }
+            val missing = roundCents(addedAmt - existingIn)
+            if (missing > 0.009) {
+                val now = System.currentTimeMillis()
+                val tx = JSONObject()
+                tx.put("id", "tx_w_${now}_${(0..999_999).random()}")
+                tx.put("categoryId", EXTRA_FUNDS_ID)
+                tx.put("amount", missing)
+                tx.put("createdAt", now)
+                tx.put("kind", "in")
+                txs.put(tx)
+            }
+            state.put("transactions", txs)
+        }
+
+        private fun syncExtraFundsLeftover(state: JSONObject, income: JSONObject) {
+            val monthly = income.optDouble("monthlyTakeHome")
+            val cats = state.optJSONArray("categories") ?: return
+            var assigned = 0.0
+            for (i in 0 until cats.length()) {
+                val cat = cats.optJSONObject(i) ?: continue
+                if (cat.optString("id") == EXTRA_FUNDS_ID || cat.optBoolean("hidden")) continue
+                assigned += cat.optDouble("budgeted", 0.0)
+            }
+            for (i in 0 until cats.length()) {
+                val cat = cats.optJSONObject(i) ?: continue
+                if (cat.optString("id") != EXTRA_FUNDS_ID) continue
+                cat.put("budgeted", roundCents(max(0.0, monthly - assigned)))
+                cat.put("hidden", false)
+            }
         }
 
         private fun inThisMonth(createdAt: Long, now: Calendar): Boolean {

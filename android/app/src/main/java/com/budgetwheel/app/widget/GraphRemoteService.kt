@@ -19,11 +19,14 @@ class GraphRemoteService : RemoteViewsService() {
     ) : RemoteViewsFactory {
         private val widgetId = intent.getIntExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, 0)
         private var rows: List<BudgetStore.Slice> = emptyList()
+        private var selectedId: String? = null
 
         override fun onCreate() {}
 
         override fun onDataSetChanged() {
-            rows = BudgetStore(context).slices()
+            val store = BudgetStore(context)
+            rows = store.slices()
+            selectedId = store.selectedSlice(widgetId)
         }
 
         override fun onDestroy() {}
@@ -33,10 +36,19 @@ class GraphRemoteService : RemoteViewsService() {
         override fun getViewAt(position: Int): RemoteViews {
             val row = rows.getOrNull(position) ?: return RemoteViews(context.packageName, R.layout.widget_graph_row)
             val views = RemoteViews(context.packageName, R.layout.widget_graph_row)
-            views.setInt(R.id.graph_row, "setBackgroundResource", R.drawable.widget_bar_card)
+            views.setInt(
+                R.id.graph_row,
+                "setBackgroundResource",
+                if (row.id == selectedId) R.drawable.widget_bar_card_on else R.drawable.widget_bar_card,
+            )
             views.setTextViewText(R.id.bar_name, row.name)
+            val extra = row.id == BudgetStore.EXTRA_FUNDS_ID
             val envLabel = if (row.envelope > 0) BudgetStore.money(row.envelope) else "—"
-            views.setTextViewText(R.id.bar_amt, "${BudgetStore.money(row.spent)} of $envLabel")
+            views.setTextViewText(
+                R.id.bar_amt,
+                if (extra) "${BudgetStore.money(row.spent)} lost of $envLabel"
+                else "${BudgetStore.money(row.spent)} of $envLabel",
+            )
             val over = row.envelope > 0 && row.spent > row.envelope + 0.009
             val pct = if (row.envelope > 0) {
                 min(100.0, row.spent / row.envelope * 100.0)
@@ -48,7 +60,7 @@ class GraphRemoteService : RemoteViewsService() {
             val left = row.envelope - row.spent
             views.setTextViewText(
                 R.id.bar_pct,
-                if (row.envelope > 0) BudgetStore.formatPct(pct) else "No budget",
+                if (row.envelope > 0) BudgetStore.formatPct(pct) else if (extra) "Pool" else "No budget",
             )
             views.setTextViewText(
                 R.id.bar_left,

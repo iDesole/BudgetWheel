@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Budget Wheel</string>
     <string name="widget_name">Budget Wheel</string>
-    <string name="widget_description">Your wheel and I purchased. Add it from the home screen widget picker.</string>
+    <string name="widget_description">Mini wheel and what’s left this month. 2×2 or 4×2. Tap to open Budget Wheel.</string>
     <string name="widget_buy">I purchased</string>
     <string name="widget_add_funds">Add Funds</string>
     <string name="widget_prev">Previous category</string>
@@ -18,12 +18,17 @@
     <string name="widget_stat_budgeted">budgeted</string>
     <string name="widget_stat_spent">spent</string>
     <string name="widget_stat_left">budget-left</string>
-    <string name="widget_stat_oob">out of budget</string>
+    <string name="widget_stat_month_funds">month funds</string>
+    <string name="widget_stat_added_funds">added funds</string>
+    <string name="widget_stat_funds_lost">funds lost</string>
+    <string name="widget_stat_oob">Out of budget</string>
     <string name="widget_stat_income">Income</string>
     <string name="widget_income_title">Income</string>
     <string name="widget_stat_over">over-Budget</string>
     <string name="widget_not_in_budget">Not in your budget</string>
+    <string name="widget_extra_funds_share">Leftover cash pool</string>
     <string name="widget_of_income">%1$s of income</string>
     <string name="widget_this_period">This %1$s</string>
     <string name="widget_all_categories">All categories</string>
+    <string name="widget_left_month">left this month</string>
 </resources>

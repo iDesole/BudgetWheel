@@ -1,7 +1,7 @@
 {
   "name": "budgetwheel",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
     "build:android": "tsc && vite build --mode android --outDir android/app/src/main/assets --emptyOutDir",
     "bundle:android": "npm run build:android && cd android && gradlew.bat bundleRelease",
     "test:calendar": "node --experimental-strip-types scripts/calendar-check.ts",
+    "test:tour": "node scripts/smoke-tour.mjs",
     "preview": "vite preview --host --port=4173"
   },
   "devDependencies": {

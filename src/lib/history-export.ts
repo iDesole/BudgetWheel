@@ -8,7 +8,7 @@
  *   4. Purchases grouped by category
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
-import { budgetSpendTotals } from "./categories.ts";
+import { EXTRA_FUNDS_ID, budgetSpendTotals } from "./categories.ts";
 import { isAndroidApp } from "./android.ts";
 import { periodLabel } from "./history.ts";
 import { formatPct } from "./money.ts";
@@ -92,7 +92,7 @@ function roundedRect(x: number, y: number, w: number, h: number, r: number): str
   ].join(" ");
 }
 
-async function writeFile(filename: string, bytes: Uint8Array, mime: string): Promise<string> {
+export async function saveDeviceFile(filename: string, bytes: Uint8Array, mime: string): Promise<string> {
   const native = androidSave();
   if (native?.saveDownload) {
     const result = native.saveDownload(filename, mime, bytesToBase64(bytes));
@@ -255,63 +255,60 @@ class HistoryPdf {
     outOfBudget: number;
     remaining: number;
   }): void {
-    const h = 140;
+    const h = 96;
     this.ensure(h + 12);
     const bottom = this.y - h;
     this.card(MARGIN, bottom, CONTENT_W, h);
     this.text("Income", { x: MARGIN + 14, y: this.y - 20, size: 8, color: soft });
     this.text(money(opts.income), { x: MARGIN + 14, y: this.y - 38, size: 14, bold: true });
+    const oob = opts.outOfBudget > 0.009;
+    const oobLbl = "Out of budget";
+    const oobVal = money(opts.outOfBudget);
+    const oobLblW = this.font.widthOfTextAtSize(oobLbl, 8);
+    const oobValW = this.bold.widthOfTextAtSize(pdfSafe(oobVal), 14);
+    const oobRight = PAGE_W - MARGIN - 14;
+    this.text(oobLbl, { x: oobRight - oobLblW, y: this.y - 20, size: 8, color: soft });
+    this.text(oobVal, {
+      x: oobRight - oobValW,
+      y: this.y - 38,
+      size: 14,
+      bold: true,
+      color: oob ? err : on,
+    });
     const cols = 3;
     const gap = 8;
     const inner = CONTENT_W - 28;
     const cellW = (inner - gap * (cols - 1)) / cols;
     const cellH = 36;
+    const cellY = bottom + 12;
     const over = opts.remaining < 0;
-    const oob = opts.outOfBudget > 0.009;
-    const top = [
+    const cells = [
       { val: opts.envelope > 0 ? money(opts.envelope) : "-", lbl: "budgeted", warn: false },
       { val: money(opts.spent), lbl: "spent", warn: false },
-      { val: money(opts.outOfBudget), lbl: "out of budget", warn: oob },
+      {
+        val: money(over ? -opts.remaining : opts.remaining),
+        lbl: over ? "over-Budget" : "budget-left",
+        warn: over,
+      },
     ];
-    const topY = bottom + 12 + cellH + gap;
-    top.forEach((cell, i) => {
+    cells.forEach((cell, i) => {
       const x = MARGIN + 14 + i * (cellW + gap);
-      this.page.drawSvgPath(roundedRect(x, topY, cellW, cellH, 10), { color: track });
+      this.page.drawSvgPath(roundedRect(x, cellY, cellW, cellH, 10), { color: track });
       const vw = this.bold.widthOfTextAtSize(pdfSafe(cell.val), 10);
       this.text(cell.val, {
         x: x + (cellW - Math.min(vw, cellW - 8)) / 2,
-        y: topY + 18,
+        y: cellY + 18,
         size: 10,
         bold: true,
         color: cell.warn ? err : on,
       });
       const lw = this.font.widthOfTextAtSize(cell.lbl.toUpperCase(), 7);
       this.text(cell.lbl.toUpperCase(), {
-        x: x + (cellW - Math.min(lw, cellW - 6)) / 2,
-        y: topY + 7,
+        x: x + (cellW - lw) / 2,
+        y: cellY + 7,
         size: 7,
         color: soft,
       });
-    });
-    const leftX = MARGIN + 14 + 2 * (cellW + gap);
-    const leftY = bottom + 12;
-    this.page.drawSvgPath(roundedRect(leftX, leftY, cellW, cellH, 10), { color: track });
-    const leftLbl = over ? "over-Budget" : "budget-left";
-    const leftVal = money(over ? -opts.remaining : opts.remaining);
-    const lvw = this.bold.widthOfTextAtSize(pdfSafe(leftVal), 10);
-    this.text(leftVal, {
-      x: leftX + (cellW - Math.min(lvw, cellW - 8)) / 2,
-      y: leftY + 18,
-      size: 10,
-      bold: true,
-      color: over ? err : on,
-    });
-    const llw = this.font.widthOfTextAtSize(leftLbl.toUpperCase(), 7);
-    this.text(leftLbl.toUpperCase(), {
-      x: leftX + (cellW - llw) / 2,
-      y: leftY + 7,
-      size: 7,
-      color: soft,
     });
     this.y = bottom - 14;
   }
@@ -334,7 +331,10 @@ class HistoryPdf {
       const left = slice.envelope - slice.spent;
       const pct = slice.envelope > 0 ? Math.min(100, (slice.spent / slice.envelope) * 100) : slice.spent > 0 ? 100 : 0;
       const name = fitText(this.bold, slice.name, 11, CONTENT_W * 0.52);
-      const amt = `${money(slice.spent)} of ${slice.envelope > 0 ? money(slice.envelope) : "-"}`;
+      const amt =
+        slice.id === EXTRA_FUNDS_ID
+          ? `${money(slice.spent)} lost of ${slice.envelope > 0 ? money(slice.envelope) : "-"}`
+          : `${money(slice.spent)} of ${slice.envelope > 0 ? money(slice.envelope) : "-"}`;
       this.text(name, { x: MARGIN + 14, y: this.y - 24, size: 11, bold: true });
       this.text(amt, { y: this.y - 23, size: 9, bold: true, color: soft, right: PAGE_W - MARGIN - 14 });
       const trackY = this.y - 40;
@@ -391,7 +391,8 @@ class HistoryPdf {
       });
       const name = fitText(this.bold, group.slice.name, 11, CONTENT_W - 140);
       this.text(name, { x: MARGIN + 28, y: headY, size: 11, bold: true });
-      this.text(money(group.slice.spent), {
+      const added = group.rows.filter((tx) => tx.kind === "in").reduce((sum, tx) => sum + tx.amount, 0);
+      this.text(added > 0.009 && group.slice.spent <= 0.009 ? `+${money(added)}` : money(group.slice.spent), {
         y: headY,
         size: 10,
         color: soft,
@@ -414,7 +415,7 @@ class HistoryPdf {
           year: "numeric",
         });
         this.text(when, { x: MARGIN + 14, y, size: 9, color: soft });
-        this.text(`-${money(tx.amount)}`, {
+        this.text(tx.kind === "in" ? `+${money(tx.amount)}` : `-${money(tx.amount)}`, {
           y,
           size: 9,
           color: on,
@@ -452,7 +453,7 @@ async function buildHistoryPdf(snap: WheelSnapshot): Promise<Uint8Array> {
     envelope: totalEnv,
     spent: totalSpent,
     outOfBudget,
-    remaining: totalEnv - totalSpent,
+    remaining: totals.remaining,
   });
   pdf.drawBars(slices);
   pdf.drawPurchases(slices, txs);
@@ -466,7 +467,7 @@ async function buildHistoryPdf(snap: WheelSnapshot): Promise<Uint8Array> {
 export async function downloadHistoryWheel(snap: WheelSnapshot): Promise<string> {
   const bytes = await buildHistoryPdf(snap);
   const filename = `Budget-Wheel-${fileSafe(snap.label || snap.id)}.pdf`;
-  return writeFile(filename, bytes, "application/pdf");
+  return saveDeviceFile(filename, bytes, "application/pdf");
 }
 
 export async function downloadHistoryWheels(snaps: WheelSnapshot[]): Promise<string> {

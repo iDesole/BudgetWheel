@@ -2,19 +2,21 @@
  * App state, persistence, and the live wheel.
  *
  * Jobs, in order:
- *   1. In-memory UI (screen stack, selected slice, toasts)
+ *   1. In-memory UI (screen stack, selected slice, toasts, tour)
  *   2. History archives (thin wrappers over src/lib/history.ts)
  *   3. Persist — IndexedDB plus the Android widget JSON
  *   4. Mutations (income, Extra Funds adds, categories, purchases)
  *   5. Live wheel queries (period spend, slices, over-budget)
  *   6. Period rollover at local midnight
+ *   7. Theme, walkthrough, and the 7-day Play review prompt
  *
  * The widget is the same budget. persist() absorbs widget JSON unless
- * skipAbsorb (local deletes / Add Funds). A newer widget copy can update
- * income and leftover Extra Funds; local transaction deletes still win.
+ * skipAbsorb (local deletes). A newer widget copy can update income and
+ * leftover Extra Funds; local transaction deletes still win.
  * Then IndexedDB write + pushBudgetToAndroid. Native merge keeps widget
- * purchases newer than priorUpdatedAt. Extra Funds is leftover income,
- * never assigned budget spending.
+ * purchases newer than priorUpdatedAt. Extra Funds is leftover take-home
+ * plus cash-in activity — never a second income source, never assigned
+ * budget spending.
  */
 import { ensureDeviceSession, getCachedUser, type AuthUser } from "./auth.ts";
 import { idbDel, idbGet, idbSet } from "./db.ts";
@@ -22,12 +24,16 @@ import {
   canHideCategory,
   compareCategories,
   createDefaultCategories,
+  extraFundsAdded,
   EXTRA_FUNDS_ID,
+  isFundsIn,
+  isOutOfBudgetSpend,
   nextCustomColor,
   retireDebtPayments,
   syncExtraFunds,
+  withExtraFundsPool,
 } from "./lib/categories.ts";
-import { ADDED_FUNDS_SOURCE_ID, combineIncome, finalizeIncome, listedSources, normalizeSourceKinds } from "./lib/income.ts";
+import { combineIncome, finalizeIncome, listedSources, normalizeSourceKinds, peelAddedFunds } from "./lib/income.ts";
 import { clampMoney, uid } from "./lib/money.ts";
 import {
   advancePeriodCursor,
@@ -49,6 +55,8 @@ import {
   quarterYear,
 } from "./lib/quarter.ts";
 import { pullBudgetFromAndroid, pushBudgetToAndroid } from "./lib/android.ts";
+import { nextOpenDay, reviewAfterChoice, reviewEligible } from "./lib/review.ts";
+import { applyTheme } from "./lib/theme.ts";
 import {
   deleteHistory,
   findSnapshot,
@@ -75,7 +83,10 @@ import type {
   IncomeKind,
   IncomeSource,
   PersistedState,
+  HomeChart,
+  ReviewPromptState,
   Screen,
+  ThemePref,
   Transaction,
   WheelScale,
   WheelSnapshot,
@@ -126,6 +137,13 @@ function emptyState(): PersistedState {
     yearHistory: [],
     wheelScale: "month",
     homeChart: "wheel",
+    theme: "dark",
+    tutorialComplete: false,
+    tutorialReplayedAt: 0,
+    firstSetupAt: 0,
+    reviewPromptState: "not_asked",
+    openDayCount: 0,
+    lastOpenDay: "",
     updatedAt: 0,
   };
 }
@@ -142,6 +160,9 @@ export let toastMessage: string | null = null;
 export let selectedSliceId: string | null = null;
 export let stateFilter = "";
 export let sessionUser: AuthUser | null = null;
+export let tourStep: number | null = null;
+export let tourReplay = false;
+export let reviewPromptVisible = false;
 let toastTimer = 0;
 let starting = false;
 let persistTail: Promise<void> = Promise.resolve();
@@ -170,7 +191,14 @@ export function canGoBack(): boolean {
   return state.onboardingComplete && screen.id !== "home" && screen.id !== "settings" && screen.id !== "past-quarter";
 }
 
+function tourBlocks(next: Screen): boolean {
+  if (tourStep == null) return false;
+  if (tourStep <= 3) return next.id !== "home";
+  return next.id !== "settings";
+}
+
 export function go(next: Screen, opts?: { replace?: boolean }): void {
+  if (tourBlocks(next)) return;
   if (!opts?.replace) stack.push(screen);
   screen = next;
   writeHistory(opts?.replace ? "replace" : "push");
@@ -229,14 +257,30 @@ export function back(): void {
 }
 
 export function handlePopState(): void {
+  if (tourStep != null) {
+    writeHistory("push");
+    void skipTour();
+    return;
+  }
+  if (reviewPromptVisible) {
+    writeHistory("push");
+    void resolveReview("later");
+    return;
+  }
   const sheet = document.querySelector(".over-sheet");
   const colorPop = document.querySelector(".color-pop");
   const periodDrop = document.querySelector(".period-drop.is-open");
+  const tourLayer = document.querySelector(".tour-root");
   if (sheet || colorPop || periodDrop) {
     writeHistory("push");
     sheet?.remove();
     colorPop?.remove();
     periodDrop?.classList.remove("is-open");
+    return;
+  }
+  if (tourLayer) {
+    writeHistory("push");
+    void skipTour();
     return;
   }
   applyingHistory = true;
@@ -248,6 +292,7 @@ export function handlePopState(): void {
 }
 
 export function resetNav(next: Screen): void {
+  if (tourBlocks(next)) return;
   stack = [];
   screen = next;
   writeHistory("replace");
@@ -344,8 +389,109 @@ export async function setWheelScale(scale: WheelScale): Promise<void> {
   emit();
 }
 
+export async function setHomeChart(chart: HomeChart): Promise<void> {
+  if (tourStep != null && tourStep < 3) return;
+  state.homeChart = chart === "bars" ? "bars" : "wheel";
+  await persist();
+  emit();
+}
+
 export async function toggleHomeChart(): Promise<void> {
-  state.homeChart = state.homeChart === "bars" ? "wheel" : "bars";
+  await setHomeChart(state.homeChart === "bars" ? "wheel" : "bars");
+}
+
+export async function setTheme(theme: ThemePref): Promise<void> {
+  state.theme = theme === "light" || theme === "system" ? theme : "dark";
+  applyTheme(state.theme);
+  await persist();
+  emit();
+}
+
+// ---------------------------------------------------------------------------
+// Walkthrough (6 live-UI steps) and Play review prompt
+// ---------------------------------------------------------------------------
+
+export function startTour(opts?: { replay?: boolean }): void {
+  tourReplay = Boolean(opts?.replay);
+  tourStep = 1;
+  selectedSliceId = null;
+  reviewPromptVisible = false;
+  if (state.homeChart !== "wheel") state.homeChart = "wheel";
+  resetNav({ id: "home" });
+}
+
+export async function skipTour(): Promise<void> {
+  if (tourStep == null) return;
+  tourStep = null;
+  tourReplay = false;
+  state.tutorialComplete = true;
+  await persist();
+  emit();
+}
+
+export async function goTourStep(step: number): Promise<void> {
+  const next = Math.min(6, Math.max(1, Math.round(step)));
+  tourStep = next;
+  if (next <= 3) {
+    if (next === 1) {
+      selectedSliceId = null;
+      if (state.homeChart !== "wheel") state.homeChart = "wheel";
+    }
+    if (next === 2) {
+      const slices = wheelCategories();
+      const pick = slices.find((s) => s.id !== EXTRA_FUNDS_ID) ?? slices[0];
+      if (pick) selectedSliceId = pick.id;
+    }
+    if (next === 3) selectedSliceId = null;
+    if (screen.id !== "home") resetNav({ id: "home" });
+    else emit();
+    return;
+  }
+  if (screen.id !== "settings") resetNav({ id: "settings" });
+  else emit();
+}
+
+export async function advanceTour(): Promise<void> {
+  if (tourStep == null) return;
+  if (tourStep >= 6) {
+    await finishTour();
+    return;
+  }
+  await goTourStep(tourStep + 1);
+}
+
+export async function finishTour(): Promise<void> {
+  state.tutorialComplete = true;
+  if (tourReplay) state.tutorialReplayedAt = Date.now();
+  tourStep = null;
+  tourReplay = false;
+  if (state.homeChart !== "wheel") state.homeChart = "wheel";
+  selectedSliceId = null;
+  await persist();
+  resetNav({ id: "home" });
+}
+
+function noteOpenDay(): boolean {
+  const next = nextOpenDay(state);
+  if (!next) return false;
+  state.lastOpenDay = next.lastOpenDay;
+  state.openDayCount = next.openDayCount;
+  return true;
+}
+
+export function maybeOfferReview(): void {
+  if (tourStep != null || reviewPromptVisible) return;
+  if (!reviewEligible(state)) return;
+  reviewPromptVisible = true;
+  state.reviewPromptState = "shown";
+  void persist();
+  emit();
+}
+
+export async function resolveReview(choice: "rate" | "later" | "never"): Promise<void> {
+  reviewPromptVisible = false;
+  const next: ReviewPromptState = reviewAfterChoice(choice);
+  state.reviewPromptState = next;
   await persist();
   emit();
 }
@@ -362,7 +508,10 @@ export function allocatedPct(): number {
   return (allocatedMonthly() / income) * 100;
 }
 
-
+function resumeTourIfNeeded(): void {
+  if (!state.onboardingComplete || state.tutorialComplete || tourStep != null) return;
+  startTour();
+}
 
 // ---------------------------------------------------------------------------
 // History archives (thin wrappers — persist/emit stay here)
@@ -551,8 +700,8 @@ function absorbAndroidBudget(): boolean {
   }
   const have = new Set(state.transactions.map((tx) => tx.id));
   // New widget purchases only. Older missing ids are local deletes — never
-  // put those back. If the widget wrote last (Add Funds, leftover income),
-  // take its income/categories but keep this device's transaction list.
+  // put those back. If the widget wrote last, take its income/categories
+  // but keep this device's transaction list.
   const extra = fromWidget.transactions.filter(
     (tx) => !have.has(tx.id) && tx.createdAt > state.updatedAt,
   );
@@ -575,6 +724,7 @@ function absorbAndroidBudget(): boolean {
 /** Write IndexedDB, then push JSON to the widget. Absorb widget purchases first. */
 async function writePersistedState(opts?: { skipAbsorb?: boolean }): Promise<void> {
   if (!opts?.skipAbsorb) absorbAndroidBudget();
+  peelState();
   rolloverIfNeeded();
   const migrated = retireDebtPayments(state.categories, state.transactions);
   const priorUpdatedAt = state.updatedAt;
@@ -609,12 +759,20 @@ function applySaved(saved: PersistedState | null | undefined): void {
   const now = new Date();
   const q = getQuarter(now);
   state = clean ?? emptyState();
+  peelState();
+  applyTheme(state.theme);
   if (!state.activeQuarterId) {
     state = { ...state, activeQuarterId: q.id };
   }
   if (!state.activeMonthId) {
     state = { ...state, activeMonthId: monthIdFromDate(now) };
   }
+}
+
+function peelState(): void {
+  const next = peelAddedFunds(state.income, state.transactions);
+  state.income = next.income;
+  state.transactions = next.transactions;
 }
 
 function routeAfterLoad(): void {
@@ -636,7 +794,8 @@ async function loadLocalData(): Promise<void> {
   const legacy = sanitizeState(await idbGet<PersistedState>(LEGACY_STATE_KEY));
   applySaved(local ?? legacy ?? null);
   const rolled = rolloverIfNeeded();
-  if (rolled || local || legacy) await persist();
+  const opened = noteOpenDay();
+  if (rolled || local || legacy || opened) await persist();
   else await cacheLocal();
   if (legacy) await idbDel(LEGACY_STATE_KEY);
 }
@@ -654,6 +813,8 @@ export async function hydrate(): Promise<void> {
   if (absorbAndroidBudget()) await persist();
   else pushBudgetToAndroid(state);
   routeAfterLoad();
+  resumeTourIfNeeded();
+  maybeOfferReview();
   emit();
 }
 
@@ -667,6 +828,8 @@ export async function startOnThisDevice(): Promise<void> {
     if (absorbAndroidBudget()) await persist();
     else await persist();
     routeAfterLoad();
+    resumeTourIfNeeded();
+    maybeOfferReview();
   } finally {
     starting = false;
     emit();
@@ -697,6 +860,7 @@ function withSources(stateCode: string, sources: IncomeSource[]): Income {
 }
 
 export async function saveIncomeFromDraft(): Promise<Income | null> {
+  peelState();
   const slot = draft.slot ?? "primary";
   const incoming = finalizeIncome(draft);
   if (!incoming) return null;
@@ -731,6 +895,7 @@ export async function saveIncomeFromDraft(): Promise<Income | null> {
 
 export async function removeIncomeSource(id: string): Promise<void> {
   if (!state.income) return;
+  peelState();
   const current = listedSources(state.income);
   if (current.length <= 1) return;
   const next = current.filter((s) => s.id !== id);
@@ -775,48 +940,41 @@ export async function removeCategory(id: string): Promise<void> {
   emit();
 }
 
-/** Extra cash into leftover Extra Funds. Not a purchase. Skip absorb so a stale widget JSON cannot wipe the add. */
+/** Extra cash this period. Extra Funds activity, not a Settings income source. */
 export async function addExtraFunds(amount: number): Promise<void> {
   const add = clampMoney(amount);
   if (add <= 0 || !state.income) return;
   rolloverIfNeeded();
-  const current = listedSources(state.income);
-  const existing = current.find((s) => s.id === ADDED_FUNDS_SOURCE_ID);
-  const bumped = existing
-    ? {
-        ...existing,
-        kind: "side" as const,
-        type: "side" as const,
-        monthlyGross: clampMoney(existing.monthlyGross + add),
-        monthlyTakeHome: clampMoney(existing.monthlyTakeHome + add),
-      }
-    : {
-        id: ADDED_FUNDS_SOURCE_ID,
-        kind: "side" as const,
-        type: "side" as const,
-        monthlyGross: add,
-        monthlyTakeHome: add,
-        estimatedTaxAnnual: 0,
-      };
-  const next = existing
-    ? current.map((s) => (s.id === ADDED_FUNDS_SOURCE_ID ? bumped : s))
-    : [...current, bumped];
-  state.income = withSources(state.income.state, next);
-  await persist({ skipAbsorb: true });
+  const tx: Transaction = {
+    id: uid("tx"),
+    categoryId: EXTRA_FUNDS_ID,
+    amount: add,
+    createdAt: Date.now(),
+    kind: "in",
+  };
+  state.transactions = [...state.transactions, tx];
+  await persist();
   emit();
+  maybeOfferReview();
 }
 
 export async function addPurchase(categoryId: string, amount: number): Promise<void> {
+  if (categoryId === EXTRA_FUNDS_ID) {
+    await addExtraFunds(amount);
+    return;
+  }
   rolloverIfNeeded();
   const tx: Transaction = {
     id: uid("tx"),
     categoryId,
     amount: clampMoney(amount),
     createdAt: Date.now(),
+    kind: "out",
   };
   state.transactions = [...state.transactions, tx];
   await persist();
   emit();
+  maybeOfferReview();
 }
 
 export async function deletePurchase(id: string): Promise<void> {
@@ -832,7 +990,13 @@ export async function deletePurchase(id: string): Promise<void> {
 export async function completeOnboarding(): Promise<void> {
   rolloverIfNeeded();
   state.onboardingComplete = true;
+  if (!state.firstSetupAt) state.firstSetupAt = Date.now();
+  noteOpenDay();
   await persist();
+  if (!state.tutorialComplete) {
+    startTour();
+    return;
+  }
   resetNav({ id: "home" });
 }
 
@@ -842,6 +1006,10 @@ export async function resetAll(): Promise<void> {
   stack = [];
   selectedSliceId = null;
   toastMessage = null;
+  tourStep = null;
+  tourReplay = false;
+  reviewPromptVisible = false;
+  applyTheme(state.theme);
   await persist({ skipAbsorb: true });
   if (sessionUser) {
     resetNav({ id: "pay-type" });
@@ -863,11 +1031,31 @@ export function sortedCategories(): Category[] {
 }
 
 /** Spend in the current scale. Yearly also folds in quarter archives that have no live txs left. */
+export function extraFundsInPeriod(now = new Date()): number {
+  const scale = state.wheelScale;
+  let sum = 0;
+  for (const tx of state.transactions) {
+    const add = extraFundsAdded(tx);
+    if (add <= 0) continue;
+    if (scale === "month" && !isSameMonth(tx.createdAt, now)) continue;
+    if (scale === "quarter" && !isSameQuarter(tx.createdAt, now)) continue;
+    if (scale === "year" && !isSameYear(tx.createdAt, now)) continue;
+    sum += add;
+  }
+  return clampMoney(sum);
+}
+
+/** Take-home for the scale plus Extra Funds cash-in this period. */
+export function periodIncome(now = new Date()): number {
+  return clampMoney((state.income?.monthlyTakeHome ?? 0) * periodMultiplier() + extraFundsInPeriod(now));
+}
+
 export function periodSpentMap(now = new Date()): Map<string, number> {
   const map = new Map<string, number>();
   const scale = state.wheelScale;
   const year = now.getFullYear();
   for (const tx of state.transactions) {
+    if (isFundsIn(tx)) continue;
     if (scale === "month" && !isSameMonth(tx.createdAt, now)) continue;
     if (scale === "quarter" && !isSameQuarter(tx.createdAt, now)) continue;
     if (scale === "year" && !isSameYear(tx.createdAt, now)) continue;
@@ -893,17 +1081,20 @@ export function periodSpentMap(now = new Date()): Map<string, number> {
 
 export function wheelCategories(): Array<Category & { spent: number; remaining: number; envelope: number }> {
   const spent = periodSpentMap();
-  return sortedCategories()
+  const extraIn = extraFundsInPeriod();
+  const rows = sortedCategories()
     .filter((c) => !c.hidden && (c.id === EXTRA_FUNDS_ID || c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0))
     .map((c) => {
       const used = spent.get(c.id) ?? 0;
-      const envelope = quarterlyBudget(c.budgeted);
+      const leftover = quarterlyBudget(c.budgeted);
+      const envelope = c.id === EXTRA_FUNDS_ID ? leftover + extraIn : leftover;
       return { ...c, spent: used, envelope, remaining: envelope - used };
     });
+  return withExtraFundsPool(rows);
 }
 
 export function isOverBudget(): boolean {
-  const income = (state.income?.monthlyTakeHome ?? 0) * periodMultiplier();
+  const income = periodIncome();
   if (income <= 0) return allocatedMonthly() > 0;
   const allocated = allocatedMonthly() * periodMultiplier();
   const spent = [...periodSpentMap().values()].reduce((s, n) => s + n, 0);
@@ -913,8 +1104,12 @@ export function isOverBudget(): boolean {
 export async function refreshOnForeground(): Promise<void> {
   const changed = absorbAndroidBudget();
   const rolled = rolloverIfNeeded();
+  const opened = noteOpenDay();
+  applyTheme(state.theme);
   schedulePeriodWatch();
-  if (changed || rolled) await persist();
+  if (changed || rolled || opened) await persist();
+  resumeTourIfNeeded();
+  maybeOfferReview();
   emit();
 }
 
@@ -922,29 +1117,98 @@ export interface CategoryActivityLine {
   id: string;
   amount: number;
   createdAt: number;
+  kind?: "in" | "out";
+  sourceName?: string;
   archiveLabel?: string;
+}
+
+function inCurrentScale(createdAt: number, now: Date): boolean {
+  const scale = state.wheelScale;
+  if (scale === "month") return isSameMonth(createdAt, now);
+  if (scale === "quarter") return isSameQuarter(createdAt, now);
+  if (scale === "year") return isSameYear(createdAt, now);
+  return true;
+}
+
+/** Extra Funds list: adds plus purchases that drew from the pool. */
+export function extraFundsActivityFromTxs(
+  txs: Transaction[],
+  slices: Array<{ id: string; name: string; envelope: number }>,
+): CategoryActivityLine[] {
+  const oobIds = new Set(
+    slices.filter((s) => isOutOfBudgetSpend(s.id, s.envelope)).map((s) => s.id),
+  );
+  const names = new Map(slices.map((s) => [s.id, s.name]));
+  const lines: CategoryActivityLine[] = [];
+  for (const t of txs) {
+    if (t.categoryId === EXTRA_FUNDS_ID) {
+      lines.push({
+        id: t.id,
+        amount: t.amount,
+        createdAt: t.createdAt,
+        kind: t.kind === "in" ? "in" : "out",
+      });
+      continue;
+    }
+    if (!oobIds.has(t.categoryId) || isFundsIn(t)) continue;
+    lines.push({
+      id: t.id,
+      amount: t.amount,
+      createdAt: t.createdAt,
+      kind: "out",
+      sourceName: names.get(t.categoryId) ?? categoryById(t.categoryId)?.name ?? "Out of budget",
+    });
+  }
+  return lines.sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export function categoryPeriodActivity(categoryId: string): CategoryActivityLine[] {
   const now = new Date();
   const scale = state.wheelScale;
   const year = now.getFullYear();
-  const lines: CategoryActivityLine[] = [];
+  const periodTxs = state.transactions.filter((t) => inCurrentScale(t.createdAt, now));
 
-  for (const t of state.transactions) {
+  if (categoryId === EXTRA_FUNDS_ID) {
+    const lines = extraFundsActivityFromTxs(periodTxs, wheelCategories());
+    if (scale !== "year") return lines;
+    const covered = new Set<string>();
+    for (const t of periodTxs) covered.add(quarterIdFromDate(new Date(t.createdAt)));
+    for (const snap of state.quarterHistory ?? []) {
+      const qid = snap.quarterId || snap.id;
+      if (quarterYear(qid) !== year) continue;
+      if (covered.has(qid) || covered.has(snap.id)) continue;
+      const end = Date.parse(snap.endIso);
+      const at = Number.isFinite(end) ? end : snap.capturedAt;
+      for (const cat of snap.categories) {
+        if (cat.spent <= 0.009) continue;
+        if (cat.id === EXTRA_FUNDS_ID) {
+          lines.push({ id: `archive:${snap.id}:${cat.id}`, amount: cat.spent, createdAt: at, archiveLabel: snap.label });
+          continue;
+        }
+        const envelope = cat.budgetedMonthly * (snap.periodMonths || 3);
+        if (!isOutOfBudgetSpend(cat.id, envelope)) continue;
+        lines.push({
+          id: `archive:${snap.id}:${cat.id}`,
+          amount: cat.spent,
+          createdAt: at,
+          kind: "out",
+          sourceName: cat.name,
+          archiveLabel: snap.label,
+        });
+      }
+    }
+    return lines.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  const lines: CategoryActivityLine[] = [];
+  for (const t of periodTxs) {
     if (t.categoryId !== categoryId) continue;
-    if (scale === "month" && !isSameMonth(t.createdAt, now)) continue;
-    if (scale === "quarter" && !isSameQuarter(t.createdAt, now)) continue;
-    if (scale === "year" && !isSameYear(t.createdAt, now)) continue;
-    lines.push({ id: t.id, amount: t.amount, createdAt: t.createdAt });
+    lines.push({ id: t.id, amount: t.amount, createdAt: t.createdAt, kind: t.kind === "in" ? "in" : "out" });
   }
 
   if (scale === "year") {
     const covered = new Set<string>();
-    for (const t of state.transactions) {
-      if (!isSameYear(t.createdAt, now)) continue;
-      covered.add(quarterIdFromDate(new Date(t.createdAt)));
-    }
+    for (const t of periodTxs) covered.add(quarterIdFromDate(new Date(t.createdAt)));
     for (const snap of state.quarterHistory ?? []) {
       const qid = snap.quarterId || snap.id;
       if (quarterYear(qid) !== year) continue;
@@ -973,5 +1237,6 @@ export function recentTransactions(categoryId: string, limit = 5): Transaction[]
       categoryId,
       amount: line.amount,
       createdAt: line.createdAt,
+      kind: line.kind === "in" ? "in" as const : "out" as const,
     }));
 }

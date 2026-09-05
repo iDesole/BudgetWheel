@@ -1,6 +1,8 @@
 export type IncomeKind = "primary" | "second" | "side";
 export type WheelScale = "month" | "quarter" | "year";
 export type HomeChart = "wheel" | "bars";
+export type ThemePref = "dark" | "light" | "system";
+export type ReviewPromptState = "not_asked" | "shown" | "rated" | "declined" | "never";
 
 export interface IncomeSource {
   id: string;
@@ -38,11 +40,15 @@ export interface Category {
   hidden: boolean;
 }
 
+/** `"in"` is Extra Funds cash added this period. Missing / `"out"` is a purchase. */
+export type TransactionKind = "in" | "out";
+
 export interface Transaction {
   id: string;
   categoryId: string;
   amount: number;
   createdAt: number;
+  kind?: TransactionKind;
 }
 
 export interface SnapshotCategory {
@@ -83,6 +89,15 @@ export interface PersistedState {
   yearHistory: WheelSnapshot[];
   wheelScale: WheelScale;
   homeChart: HomeChart;
+  theme: ThemePref;
+  /** False until the 6-step walkthrough is finished or skipped. */
+  tutorialComplete: boolean;
+  tutorialReplayedAt: number;
+  /** Local timestamp when onboarding first finished. Drives the 7-day review wait. */
+  firstSetupAt: number;
+  reviewPromptState: ReviewPromptState;
+  openDayCount: number;
+  lastOpenDay: string;
   updatedAt: number;
 }
 

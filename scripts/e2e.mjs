@@ -28,7 +28,7 @@ function assert(cond, msg) {
 try {
   await page.goto(base, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Budget Wheel" }).waitFor();
-  await page.getByRole("button", { name: "Get started" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
 
   await page.getByRole("heading", { name: /salary or hourly/i }).waitFor();
   await page.getByRole("button", { name: /Salary/ }).click();
@@ -43,6 +43,9 @@ try {
   const takeHome = await page.locator(".income-hero-value").innerText();
   assert(/\$\d/.test(takeHome), `expected take-home, got ${takeHome}`);
   await page.getByRole("button", { name: /Use \$/ }).click();
+
+  await page.getByRole("heading", { name: /Any other income/i }).waitFor();
+  await page.getByRole("button", { name: "Continue to budget" }).click();
 
   await page.getByText(/of income allocated/).waitFor();
   await page.getByRole("button", { name: /Rent/ }).click();
@@ -64,10 +67,10 @@ try {
   await page.getByText("Haircuts").waitFor();
 
   await page.getByRole("button", { name: "See my wheel" }).click();
-  await page.getByRole("heading", { name: /Keep the wheel spinning/i }).waitFor();
-  await page.getByRole("button", { name: "Not now" }).click();
+  await page.getByRole("heading", { name: /This is your wheel/i }).waitFor();
+  await page.getByRole("button", { name: "Skip" }).click();
 
-  await page.getByRole("heading", { name: /Q3 2026/ }).waitFor();
+  await page.getByRole("heading", { name: /2026/ }).waitFor();
   await page.getByRole("button", { name: "I purchased" }).click();
   await typeAmount(page, "32");
   await tapKey(page, ".");
@@ -75,13 +78,13 @@ try {
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: /Groceries/ }).click();
   await page.getByText(/Logged/).waitFor();
-  await page.getByRole("heading", { name: /Q3 2026/ }).waitFor();
-
-  await page.getByRole("button", { name: "Past Quarter" }).click();
-  await page.getByText(/No archive yet/).waitFor();
+  await page.getByRole("heading", { name: /2026/ }).waitFor();
 
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByText(/Monthly income/).waitFor();
+  await page.getByText(/Appearance/).waitFor();
+  await page.getByText(/Download your wheel/).waitFor();
+  await page.getByText(/Rate Budget Wheel/).waitFor();
+  await page.getByText(/Help/).waitFor();
 
   const manifest = await page.evaluate(async () => {
     const res = await fetch("/manifest.webmanifest");
@@ -102,7 +105,7 @@ try {
     console.error("FAILURES:\n" + failures.map((f) => `- ${f}`).join("\n"));
     process.exitCode = 1;
   } else {
-    console.log("E2E passed: onboarding, catalog %, custom category, wheel, purchase, past quarter, PWA files");
+    console.log("E2E passed: onboarding, tour skip, catalog %, custom category, wheel, purchase, settings, PWA files");
   }
 } catch (err) {
   console.error("E2E crashed:", err);

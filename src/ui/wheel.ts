@@ -1,13 +1,19 @@
 /**
- * Wheel geometry. Keep lockstep with android/.../WheelRenderer.kt.
- * 100% = take-home income. Assigned envelopes fill first (cheapest inner).
- * Spend past a category's envelope, and purchases with no envelope, wrap
- * onto thinner exterior rings — one income-length per ring — so a huge
- * purchase never blows past 360°. Out-of-budget slices use an unused color.
+ * One-ring wheel. Keep lockstep with android/.../WheelRenderer.kt.
+ * Slice size is the envelope, or spend if higher. Extra Funds is remaining.
+ * 360° is the sum of those sizes.
  */
-import { EXTRA_FUNDS_ID, unusedColor } from "../lib/categories.ts";
+import { EXTRA_FUNDS_ID, isOutOfBudgetSpend, unusedColor } from "../lib/categories.ts";
 import { escapeHtml } from "../lib/money.ts";
 import { safeColor, safeId } from "../lib/sanitize.ts";
+
+const VIEW = 320;
+const HOLE = 84;
+const RING = 64;
+const PAD = 32;
+const SEAM = 0.7;
+const FULL = 359.9;
+const EPS = 0.009;
 
 export interface WheelSlice {
   id: string;
@@ -18,6 +24,25 @@ export interface WheelSlice {
   envelope: number;
 }
 
+export interface WheelArc {
+  id: string;
+  color: string;
+  r0: number;
+  r1: number;
+  a0: number;
+  a1: number;
+}
+
+export interface WheelLayout {
+  size: number;
+  hole: number;
+  mainOuter: number;
+  cx: number;
+  cy: number;
+  empty: boolean;
+  arcs: WheelArc[];
+}
+
 function polar(cx: number, cy: number, r: number, angle: number): [number, number] {
   const rad = ((angle - 90) * Math.PI) / 180;
   return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
@@ -25,7 +50,7 @@ function polar(cx: number, cy: number, r: number, angle: number): [number, numbe
 
 export function donut(cx: number, cy: number, r0: number, r1: number, a0: number, a1: number): string {
   const span = a1 - a0;
-  if (span >= 359.9) {
+  if (span >= FULL) {
     return [
       `M ${cx} ${cy - r1}`,
       `A ${r1} ${r1} 0 1 1 ${cx - 0.01} ${cy - r1}`,
@@ -42,31 +67,18 @@ export function donut(cx: number, cy: number, r0: number, r1: number, a0: number
   return `M ${x0} ${y0} A ${r1} ${r1} 0 ${large} 1 ${x1} ${y1} L ${x2} ${y2} A ${r0} ${r0} 0 ${large} 0 ${x3} ${y3} Z`;
 }
 
-export interface WheelArc {
-  id: string;
-  color: string;
-  r0: number;
-  r1: number;
-  a0: number;
-  a1: number;
-}
-
-function ringArcs(
-  items: Array<WheelSlice & { weight: number }>,
-  r0: number,
-  r1: number,
-  fullCircleAt?: number,
-): WheelArc[] {
-  const total = items.reduce((s, x) => s + x.weight, 0);
+function ringArcs(items: Array<WheelSlice & { weight: number }>, r0: number, r1: number): WheelArc[] {
+  const total = items.reduce((sum, item) => sum + item.weight, 0);
   if (total <= 0) return [];
-  const circleAt = fullCircleAt && fullCircleAt > 0 ? fullCircleAt : total;
   let angle = 0;
-  const seam = items.length > 1 ? 0.7 : 0;
+  const seam = items.length > 1 ? SEAM : 0;
   const arcs: WheelArc[] = [];
   for (const slice of items) {
-    const sweep = Math.min(359.9, (slice.weight / circleAt) * 360);
+    if (angle >= FULL) break;
+    const sweep = Math.min(FULL - angle, (slice.weight / total) * 360);
+    const gap = sweep > seam ? seam : 0;
     const a0 = angle;
-    const a1 = angle + sweep - seam;
+    const a1 = angle + sweep - gap;
     angle += sweep;
     if (a1 <= a0) continue;
     arcs.push({
@@ -81,80 +93,12 @@ function ringArcs(
   return arcs;
 }
 
-function splitLayers(
-  sized: Array<WheelSlice & { weight: number }>,
-  unit: number,
-): Array<Array<WheelSlice & { weight: number }>> {
-  if (unit <= 0.009) return sized.length ? [sized] : [];
-  const layers: Array<Array<WheelSlice & { weight: number }>> = [[]];
-  let room = unit;
-  for (const slice of sized) {
-    let left = slice.weight;
-    while (left > 0.009) {
-      if (room <= 0.009) {
-        layers.push([]);
-        room = unit;
-      }
-      const take = Math.min(left, room);
-      layers[layers.length - 1].push({ ...slice, weight: take });
-      left -= take;
-      room -= take;
-    }
-  }
-  return layers.filter((layer) => layer.length > 0);
-}
-
-/** Cheapest items stay on the inner ring; higher-cost slices overflow to exterior rings. */
-function layersByCost(
-  items: Array<WheelSlice & { weight: number }>,
-  unit: number,
-): Array<Array<WheelSlice & { weight: number }>> {
-  if (!items.length) return [];
-  if (unit <= 0.009) return [items];
-  const total = items.reduce((s, x) => s + x.weight, 0);
-  if (total <= unit + 0.009) return [items];
-  return splitLayers(
-    items.slice().sort((a, b) => a.weight - b.weight),
-    unit,
-  );
-}
-
-function layoutRings(overCount: number): {
-  size: number;
-  hole: number;
-  mainOuter: number;
-  overThick: number;
-  gap: number;
-} {
-  const size = 320;
-  const maxR = 144;
-  const gap = 2;
-  const hole = 84;
-  const preferredMain = 64;
-  const preferredOver = 32;
-  const needed = hole + preferredMain + overCount * (preferredOver + gap);
-  if (overCount <= 0 || needed <= maxR) {
-    return {
-      size,
-      hole,
-      mainOuter: hole + preferredMain,
-      overThick: preferredOver,
-      gap,
-    };
-  }
-  const remain = maxR - hole;
-  const mainThick = Math.max(28, (remain - overCount * gap) / (1 + overCount / 2));
-  return { size, hole, mainOuter: hole + mainThick, overThick: mainThick / 2, gap };
-}
-
 function isOutOfBudget(slice: WheelSlice): boolean {
-  return slice.id !== EXTRA_FUNDS_ID && slice.envelope <= 0.009 && slice.spent > 0.009;
+  return isOutOfBudgetSpend(slice.id, slice.envelope) && slice.spent > EPS;
 }
 
 function paintOutOfBudget(slices: WheelSlice[]): WheelSlice[] {
-  const used = new Set(
-    slices.filter((s) => !isOutOfBudget(s)).map((s) => s.color.toUpperCase()),
-  );
+  const used = new Set(slices.filter((s) => !isOutOfBudget(s)).map((s) => s.color.toUpperCase()));
   return slices.map((slice) => {
     if (!isOutOfBudget(slice)) return slice;
     if (!used.has(slice.color.toUpperCase())) {
@@ -167,97 +111,38 @@ function paintOutOfBudget(slices: WheelSlice[]): WheelSlice[] {
   });
 }
 
-type Weighted = WheelSlice & { weight: number };
-
-function overflowWeight(slice: WheelSlice): number {
-  if (slice.envelope <= 0.009) return Math.max(0, slice.spent);
-  return Math.max(0, slice.spent - slice.envelope);
+function sliceWeight(slice: WheelSlice): number {
+  if (slice.id === EXTRA_FUNDS_ID) return Math.max(0, slice.envelope - slice.spent);
+  return Math.max(0, slice.envelope, slice.spent);
 }
 
-/** Fill leftover inner room, then wrap the rest onto income-sized exterior rings. */
-function placeSpendOverflow(
-  inner: Weighted[],
-  assignedOnInner: number,
-  overflow: Weighted[],
-  unit: number,
-): { inner: Weighted[]; over: Weighted[][] } {
-  if (!overflow.length) return { inner, over: [] };
-  const room = Math.max(0, unit - assignedOnInner);
-  const leftover: Weighted[] = [];
-  const nextInner = [...inner];
-  if (room > 0.009) {
-    let left = room;
-    for (const item of overflow) {
-      if (left <= 0.009) {
-        leftover.push(item);
-        continue;
-      }
-      const take = Math.min(item.weight, left);
-      nextInner.push({ ...item, weight: take });
-      left -= take;
-      if (item.weight - take > 0.009) leftover.push({ ...item, weight: item.weight - take });
-    }
-  } else {
-    leftover.push(...overflow);
-  }
-  const over = leftover.length
-    ? splitLayers(
-        leftover.slice().sort((a, b) => b.weight - a.weight),
-        unit,
-      ).slice(0, 8)
-    : [];
-  return { inner: nextInner, over };
+function emptyLayout(): WheelLayout {
+  const mainOuter = HOLE + RING;
+  return { size: VIEW, hole: HOLE, mainOuter, cx: VIEW / 2, cy: VIEW / 2, empty: true, arcs: [] };
 }
 
-export function wheelRingLayout(
-  slices: WheelSlice[],
-  income = 0,
-): { size: number; hole: number; mainOuter: number; cx: number; cy: number; empty: boolean; arcs: WheelArc[] } {
-  const painted = paintOutOfBudget(slices);
-  const takeHome = Math.max(0, income);
-  const envelopeTotal = painted.reduce((s, c) => s + Math.max(0, c.envelope), 0);
-  const spentTotal = painted.reduce((s, c) => s + Math.max(0, c.spent), 0);
-  if (painted.length === 0 || (takeHome <= 0 && envelopeTotal <= 0 && spentTotal <= 0)) {
-    const { size, hole, mainOuter } = layoutRings(0);
-    return { size, hole, mainOuter, cx: size / 2, cy: size / 2, empty: true, arcs: [] };
-  }
-
-  const unbudgetedSpend = painted.filter(isOutOfBudget).reduce((sum, s) => sum + Math.max(0, s.spent), 0);
-  const cores = painted
-    .map((s) => {
-      if (s.id === EXTRA_FUNDS_ID) {
-        return { ...s, weight: Math.max(0, s.envelope - unbudgetedSpend) };
-      }
-      if (s.envelope > 0.009) return { ...s, weight: s.envelope };
-      return { ...s, weight: 0 };
-    })
-    .filter((s) => s.weight > 0.009);
-  const overflow = painted
-    .map((s) => ({ ...s, weight: overflowWeight(s) }))
-    .filter((s) => s.weight > 0.009);
-  const budgetTotal = cores.reduce((s, c) => s + c.weight, 0);
-  const unit = takeHome > 0.009 ? takeHome : Math.max(budgetTotal, overflow.reduce((s, c) => s + c.weight, 0));
-  const coreLayers = layersByCost(cores, unit);
-  const assignedOver = coreLayers.slice(1);
-  const placed = placeSpendOverflow(coreLayers[0] ?? [], Math.min(budgetTotal, unit), overflow, unit);
-  const overLayers = [...assignedOver, ...placed.over].slice(0, 8);
-  const { size, hole, mainOuter, overThick, gap } = layoutRings(overLayers.length);
-  const arcs: WheelArc[] = [];
-  if (placed.inner.length) {
-    arcs.push(...ringArcs(placed.inner, hole, mainOuter, unit));
-  }
-  overLayers.forEach((layer, index) => {
-    const r0 = mainOuter + gap + index * (overThick + gap);
-    arcs.push(...ringArcs(layer, r0, r0 + overThick, unit));
-  });
-  return { size, hole, mainOuter, cx: size / 2, cy: size / 2, empty: false, arcs };
+export function wheelRingLayout(slices: WheelSlice[]): WheelLayout {
+  const weighted = paintOutOfBudget(slices)
+    .map((slice) => ({ ...slice, weight: sliceWeight(slice) }))
+    .filter((slice) => slice.weight > EPS);
+  if (!weighted.length) return emptyLayout();
+  const mainOuter = HOLE + RING;
+  return {
+    size: VIEW,
+    hole: HOLE,
+    mainOuter,
+    cx: VIEW / 2,
+    cy: VIEW / 2,
+    empty: false,
+    arcs: ringArcs(weighted, HOLE, mainOuter),
+  };
 }
 
 export function wheelSvg(
   slices: WheelSlice[],
-  opts: { selectedId?: string | null; interactive?: boolean; income?: number } = {},
+  opts: { selectedId?: string | null; interactive?: boolean } = {},
 ): string {
-  const layout = wheelRingLayout(slices, opts.income ?? 0);
+  const layout = wheelRingLayout(slices);
   const { size, hole, mainOuter, cx, cy } = layout;
   if (layout.empty) {
     return wrapWheelSvg(
@@ -288,16 +173,19 @@ export function wheelSvg(
   return wrapWheelSvg(size, "Budget wheel", parts.join(""));
 }
 
+let wheelFilterSeq = 0;
+
 function wrapWheelSvg(size: number, label: string, inner: string): string {
-  const pad = 32;
+  wheelFilterSeq += 1;
+  const fid = `wheel-depth-${wheelFilterSeq}`;
   return `
-    <svg class="wheel-svg" viewBox="${-pad} ${-pad} ${size + pad * 2} ${size + pad * 2}" role="img" aria-label="${label}" shape-rendering="geometricPrecision">
+    <svg class="wheel-svg" viewBox="${-PAD} ${-PAD} ${size + PAD * 2} ${size + PAD * 2}" role="img" aria-label="${label}" shape-rendering="geometricPrecision">
       <defs>
-        <filter id="wheel-depth" x="-30%" y="-30%" width="160%" height="170%" color-interpolation-filters="sRGB">
+        <filter id="${fid}" x="-30%" y="-30%" width="160%" height="170%" color-interpolation-filters="sRGB">
           <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.38"/>
         </filter>
       </defs>
-      <g class="wheel-depth" filter="url(#wheel-depth)">${inner}</g>
+      <g class="wheel-depth" filter="url(#${fid})">${inner}</g>
     </svg>`;
 }
 

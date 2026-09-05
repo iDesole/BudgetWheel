@@ -1,12 +1,14 @@
 /**
  * In-app screens after onboarding: home wheel/graph, spend history,
- * purchases, archived periods, and settings.
+ * purchases, archived periods, and settings (appearance, widget pin, Help).
  * Shared chrome (graph header, top bar, Extra Funds / out-of-budget totals)
  * lives at the top so home and history render the same cards. Extra Funds is
- * leftover income, never budget spending. Selected Extra Funds uses Add Funds.
+ * leftover take-home plus cash-in activity — not a second income source.
+ * Selected Extra Funds uses Add Funds. Tour spotlight ids live on the
+ * wheel, slice card, chart toggle, Add Income, Add Widget, and history rows.
  */
 import { incomeSlotLabel, listedSources, nextIncomeNumber, sourceTypeLabel } from "../lib/income.ts";
-import { formatMoney, formatPct, parsePad, padDisplay, appendPad, escapeHtml } from "../lib/money.ts";
+import { formatMoney, formatPct, formatTxMoney, parsePad, padDisplay, appendPad, escapeHtml } from "../lib/money.ts";
 import { formatQuarterRange, getQuarter } from "../lib/quarter.ts";
 import { findState } from "../lib/states.ts";
 import {
@@ -18,22 +20,25 @@ import {
   type CategoryActivityLine,
   deleteHistorySnapshots,
   deletePurchase,
+  extraFundsActivityFromTxs,
+  extraFundsInPeriod,
   findHistorySnapshot,
   go,
   historySnapsForScale,
   historyWheelSlices,
   isOverBudget,
-  periodMultiplier,
+  periodIncome as livePeriodIncome,
   removeIncomeSource,
   periodSpentMap,
   quarterlyBudget,
-  recentTransactions,
   resetAll,
   resetNav,
+  setHomeChart,
   setSelectedSlice,
+  setTheme,
   setWheelScale,
   showToast,
-  toggleHomeChart,
+  startTour,
   snapshotSpentTotal,
   sortedCategories,
   transactionsForSnapshot,
@@ -42,9 +47,10 @@ import {
   wheelCategories,
 } from "../store.ts";
 import type { HistoryScale, WheelSnapshot } from "../types.ts";
-import { EXTRA_FUNDS_ID, NOT_IN_BUDGET_ID, budgetSpendTotals } from "../lib/categories.ts";
+import { EXTRA_FUNDS_ID, NOT_IN_BUDGET_ID, budgetSpendTotals, extraFundsCardStats } from "../lib/categories.ts";
+import { openPlayStore, pinHomeWidget } from "../lib/android.ts";
 import { downloadHistoryWheels } from "../lib/history-export.ts";
-import { periodLabel, periodWord } from "../lib/history.ts";
+import { extraInFromTransactions, periodLabel, periodWord } from "../lib/history.ts";
 import { openCategoryBudget, openColorPicker, openIncomeSource } from "./onboarding.ts";
 import { backChevron, forwardChevron, logoSvg, trashCan } from "../ui/icons.ts";
 import { bindNav, graphIcon, navBar, wheelIcon } from "../ui/nav.ts";
@@ -68,20 +74,24 @@ function budgetChartMarkup(
   }
   const rows = slices
     .map((s) => {
+      const extra = s.id === EXTRA_FUNDS_ID;
       const over = s.envelope > 0 && s.spent > s.envelope + 0.009;
       const pct = s.envelope > 0 ? Math.min(100, (s.spent / s.envelope) * 100) : s.spent > 0 ? 100 : 0;
       const left = s.envelope - s.spent;
+      const amt = extra
+        ? `${formatMoney(s.spent)} lost of ${s.envelope > 0 ? formatMoney(s.envelope) : "—"}`
+        : `${formatMoney(s.spent)} of ${s.envelope > 0 ? formatMoney(s.envelope) : "—"}`;
       return `
         <button type="button" class="budget-bar-row${opts.selectedId === s.id ? " is-selected" : ""}" data-slice="${s.id}">
           <span class="budget-bar-top">
             <span class="budget-bar-name">${escapeHtml(s.name)}</span>
-            <span class="budget-bar-amt">${formatMoney(s.spent)} of ${s.envelope > 0 ? formatMoney(s.envelope) : "—"}</span>
+            <span class="budget-bar-amt">${amt}</span>
           </span>
           <span class="budget-bar-track">
             <span class="budget-bar-fill${over ? " is-over" : ""}" style="width:${pct}%;background:${over ? "" : s.color}"></span>
           </span>
           <span class="budget-bar-meta">
-            <span>${s.envelope > 0 ? formatPct(pct, pct < 10 && pct > 0 ? 1 : 0) : "No budget"}</span>
+            <span>${s.envelope > 0 ? formatPct(pct, pct < 10 && pct > 0 ? 1 : 0) : extra ? "Pool" : "No budget"}</span>
             <span class="${left < 0 ? "is-warn" : ""}">${left < 0 ? `${formatMoney(-left)} over` : `${formatMoney(left)} left`}</span>
           </span>
         </button>`;
@@ -95,22 +105,16 @@ function budgetChartMarkup(
 
 
 
-function wheelCornerTotalsMarkup(
-  totals: { outOfBudget: number; remaining: number },
-  visible: boolean,
-): string {
-  if (!visible) return "";
-  const over = totals.remaining < 0;
+function wheelCornerTotalsMarkup(totals: { outOfBudget: number; remaining: number }): string {
   const oob = totals.outOfBudget > 0.009;
-  return `<div class="wheel-corner-totals">
-    <p class="wheel-corner-row${oob ? " is-neg" : ""}">
-      <span class="wheel-corner-val">${formatMoney(totals.outOfBudget)}</span>
-      <span class="wheel-corner-lbl">out of budget</span>
-    </p>
-    <p class="wheel-corner-row${over ? " is-neg" : ""}">
-      <span class="wheel-corner-val">${formatMoney(over ? -totals.remaining : totals.remaining)}</span>
-      <span class="wheel-corner-lbl">${over ? "over-Budget" : "budget-left"}</span>
-    </p>
+  return `<div class="wheel-corner-totals is-oob">
+    <div class="graph-stat">
+      <span class="graph-stat-val${oob ? " is-neg" : ""}">${formatMoney(totals.outOfBudget)}</span>
+      <span class="graph-stat-lbl">out of budget</span>
+    </div>
+  </div>
+  <div class="wheel-corner-totals is-left">
+    ${budgetLeftStat(totals.remaining)}
   </div>`;
 }
 
@@ -136,32 +140,63 @@ function budgetSpentOverMarkup(selected: { envelope: number; spent: number; rema
   </div>`;
 }
 
-function totalsStatsMarkup(totals: { envelope: number; spent: number; outOfBudget: number; remaining: number }): string {
-  const oob = totals.outOfBudget > 0.009;
-  return `<div class="graph-detail-stats is-totals">
+function extraFundsStatsMarkup(
+  selected: { envelope: number; spent: number },
+  addedFunds: number,
+  periodWord: string,
+): string {
+  const stats = extraFundsCardStats(selected, addedFunds);
+  return `<div class="graph-detail-stats">
     <div class="graph-stat">
-      <span class="graph-stat-val">${totals.envelope > 0 ? formatMoney(totals.envelope) : "—"}</span>
-      <span class="graph-stat-lbl">budgeted</span>
+      <span class="graph-stat-val">${formatMoney(stats.monthFunds)}</span>
+      <span class="graph-stat-lbl">${periodWord} funds</span>
     </div>
     <div class="graph-stat">
-      <span class="graph-stat-val">${formatMoney(totals.spent)}</span>
-      <span class="graph-stat-lbl">spent</span>
+      <span class="graph-stat-val${stats.addedFunds > 0.009 ? " is-in" : ""}">${formatMoney(stats.addedFunds)}</span>
+      <span class="graph-stat-lbl">added funds</span>
     </div>
-    <div class="graph-stat-stack">
-      <div class="graph-stat">
-        <span class="graph-stat-val${oob ? " is-neg" : ""}">${formatMoney(totals.outOfBudget)}</span>
-        <span class="graph-stat-lbl">out of budget</span>
-      </div>
-      ${budgetLeftStat(totals.remaining)}
+    <div class="graph-stat">
+      <span class="graph-stat-val${stats.fundsLost > 0.009 ? " is-neg" : ""}">${formatMoney(stats.fundsLost)}</span>
+      <span class="graph-stat-lbl">funds lost</span>
     </div>
   </div>`;
 }
 
-function incomeShareLabel(budgeted: number, monthlyIncome: number): string {
+function selectedSliceSub(selected: { id: string; spent: number; envelope: number }): string {
+  if (selected.id === EXTRA_FUNDS_ID) {
+    return `${formatMoney(selected.spent)} lost of ${formatMoney(selected.envelope)}`;
+  }
+  return `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}`;
+}
+
+function totalsStatsMarkup(totals: { envelope: number; spent: number; remaining: number }): string {
+  return budgetSpentOverMarkup(totals);
+}
+
+function incomeShareLabel(budgeted: number, monthlyIncome: number, categoryId?: string): string {
+  if (categoryId === EXTRA_FUNDS_ID) return "Leftover cash pool";
   if (budgeted > 0) {
     return `${formatPct(monthlyIncome > 0 ? (budgeted / monthlyIncome) * 100 : 0, 0)} of income`;
   }
   return "Not in your budget";
+}
+
+function txAmountCell(kind: "in" | "out" | undefined, amount: number): string {
+  const inn = kind === "in";
+  return `<span${inn ? ` class="is-in"` : ""}>${formatTxMoney(amount, inn ? "in" : "out")}</span>`;
+}
+
+function activityLineLabel(
+  line: CategoryActivityLine,
+  dateFmt: Intl.DateTimeFormatOptions,
+  periodWord: string,
+): string {
+  const when = line.archiveLabel
+    ? `${escapeHtml(line.archiveLabel)}<span class="muted"> · saved ${periodWord === "year" ? "quarter" : periodWord}</span>`
+    : escapeHtml(new Date(line.createdAt).toLocaleDateString("en-US", dateFmt));
+  if (!line.sourceName) return when;
+  const who = escapeHtml(line.sourceName);
+  return line.archiveLabel ? `${who} · ${when}` : `${who}<span class="muted"> · ${when}</span>`;
 }
 
 function graphDetailMarkup(opts: {
@@ -179,31 +214,59 @@ function graphDetailMarkup(opts: {
   periodIncome: number;
   totalBudgeted: number;
   periodWord: string;
+  addedFunds?: number;
   canAddBudget?: boolean;
   interactive?: boolean;
 }): string {
   if (opts.selected) {
+    const extraCard =
+      opts.selected.id === EXTRA_FUNDS_ID
+        ? extraFundsStatsMarkup(opts.selected, opts.addedFunds ?? 0, opts.periodWord)
+        : budgetSpentOverMarkup(opts.selected);
     return `<div class="graph-detail"${opts.interactive ? ` data-slice-detail role="button" tabindex="0"` : ""}>
               <div class="graph-detail-head">
                 <button type="button" class="cat-swatch" data-color-for="${opts.selected.id}" style="background:${opts.selected.color}" aria-label="Change color"></button>
                 <span class="graph-detail-copy">
                   <strong>${escapeHtml(opts.selected.name)}</strong>
-                  <span class="muted">${incomeShareLabel(opts.selected.budgeted, opts.monthlyIncome)}</span>
+                  <span class="muted">${incomeShareLabel(opts.selected.budgeted, opts.monthlyIncome, opts.selected.id)}</span>
                 </span>
                 ${opts.canAddBudget ? `<button type="button" class="slice-add-budget" data-add-budget>Add to budget</button>` : ""}
               </div>
-              ${budgetSpentOverMarkup(opts.selected)}
+              ${extraCard}
             </div>`;
   }
+  const oob = opts.totals.outOfBudget > 0.009;
   return `<div class="graph-detail">
               <div class="graph-detail-head is-totals">
                 <span class="graph-detail-copy">
                   <span class="muted">Income</span>
                   <strong>${formatMoney(opts.periodIncome)}</strong>
                 </span>
+                <span class="graph-detail-copy is-end">
+                  <span class="muted">Out of budget</span>
+                  <strong${oob ? ` class="is-neg"` : ""}>${formatMoney(opts.totals.outOfBudget)}</strong>
+                </span>
               </div>
               ${totalsStatsMarkup(opts.totals)}
             </div>`;
+}
+
+function chartToggleMarkup(graphMode: boolean): string {
+  return `<button type="button" class="icon-btn home-head-toggle" id="tour-chart" data-toggle-chart data-tour="chart-toggle" aria-label="${
+    graphMode ? "Show wheel" : "Show graph"
+  }">${graphMode ? wheelIcon : graphIcon}</button>`;
+}
+
+function bindChartToggle(el: HTMLElement): void {
+  el.querySelector("[data-toggle-chart]")?.addEventListener("click", () => {
+    void setHomeChart(state.homeChart === "bars" ? "wheel" : "bars");
+  });
+}
+
+function themeLabel(): string {
+  if (state.theme === "light") return "Light";
+  if (state.theme === "system") return "System default";
+  return "Dark";
 }
 
 function topBar(title: string): string {
@@ -228,7 +291,7 @@ export function renderHome(): HTMLElement {
   const totalEnv = totals.envelope;
   const totalSpent = totals.spent;
   const monthlyIncome = state.income?.monthlyTakeHome ?? 0;
-  const periodIncome = monthlyIncome * periodMultiplier();
+  const periodIncome = livePeriodIncome();
   const scale = state.wheelScale;
   const monthLabel = new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" });
   const yearLabel = String(new Date().getFullYear());
@@ -241,20 +304,23 @@ export function renderHome(): HTMLElement {
 
   const graphMode = state.homeChart === "bars";
   const totalBudgeted = totals.budgeted;
-  const shareLabel = selected ? incomeShareLabel(selected.budgeted, monthlyIncome) : "";
+  const shareLabel = selected ? incomeShareLabel(selected.budgeted, monthlyIncome, selected.id) : "";
   const canAddBudget = Boolean(
     selected &&
       selected.budgeted <= 0 &&
       selected.id !== EXTRA_FUNDS_ID &&
       selected.id !== NOT_IN_BUDGET_ID,
   );
+  const previewFmt: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
   const txMarkup = selected
-    ? recentTransactions(selected.id, 3)
+    ? categoryPeriodActivity(selected.id)
+        .slice(0, 3)
         .map(
-          (t) =>
-            `<div class="tx-row"><span>${new Date(t.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span><span>−${formatMoney(t.amount)}</span></div>`,
+          (line) =>
+            `<div class="tx-row"><span>${activityLineLabel(line, previewFmt, periodWord)}</span>${txAmountCell(line.kind, line.amount)}</div>`,
         )
-        .join("") || `<p class="muted tiny">No purchases yet this ${periodWord}.</p>`
+        .join("") ||
+      `<p class="muted tiny">${selected.id === EXTRA_FUNDS_ID ? `No Extra Funds activity yet this ${periodWord}.` : `No purchases yet this ${periodWord}.`}</p>`
     : "";
   const graphDetail = graphMode
     ? graphDetailMarkup({
@@ -264,13 +330,14 @@ export function renderHome(): HTMLElement {
         periodIncome,
         totalBudgeted,
         periodWord,
+        addedFunds: extraFundsInPeriod(),
         canAddBudget,
         interactive: true,
       })
     : "";
   const sliceDetail =
     !graphMode && selected
-      ? `<div class="slice-card" data-slice-detail role="button" tabindex="0">
+      ? `<div class="slice-card" id="tour-slice" data-tour="slice" data-slice-detail role="button" tabindex="0">
               <div class="slice-card-top">
                 <button type="button" class="cat-swatch" data-color-for="${selected.id}" style="background:${selected.color}" aria-label="Change color"></button>
                 <span class="slice-card-copy">
@@ -302,7 +369,7 @@ export function renderHome(): HTMLElement {
           <p class="brand-mini">Budget Wheel</p>
           <h1 class="quarter-title">${titleLabel}</h1>
         </div>
-        <button type="button" class="icon-btn home-head-toggle" data-toggle-chart aria-label="${graphMode ? "Show wheel" : "Show graph"}">${graphMode ? wheelIcon : graphIcon}</button>
+        ${chartToggleMarkup(graphMode)}
       </header>
       ${graphDetail}
       ${
@@ -311,15 +378,17 @@ export function renderHome(): HTMLElement {
               selectedId: selectedSliceId,
             })
           : `<div class="wheel-wrap">
-        ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true, income: periodIncome })}
+        <div class="wheel-stage" id="tour-wheel" data-tour="wheel">
+        ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
         ${wheelCenterMarkup({
           label: centerLabel,
           value: formatMoney(centerValue),
           negative: centerValue < 0,
-          subPrimary: selected ? `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}` : `${formatMoney(totalSpent)} spent`,
+          subPrimary: selected ? selectedSliceSub(selected) : `${formatMoney(totalSpent)} spent`,
           subSecondary: selected ? undefined : `of ${formatMoney(totalEnv)} budget`,
         })}
-        ${wheelCornerTotalsMarkup(totals, !selected)}
+        </div>
+        ${wheelCornerTotalsMarkup(totals)}
         ${
           slices.length
             ? `<button type="button" class="wheel-cycle-btn is-left" data-cycle="1" aria-label="Previous category">${backChevron}</button>
@@ -341,7 +410,13 @@ export function renderHome(): HTMLElement {
           ? ""
           : slices.length && graphMode
             ? ""
-            : `<p class="hint center-hint">${slices.length ? "Tap a slice for details" : "Set category amounts in Settings"}</p>`
+            : `<p class="hint center-hint">${
+                slices.length
+                  ? slices.some((s) => s.spent > 0.009)
+                    ? "Tap a slice for details"
+                    : "Tap I purchased to log your first spend."
+                  : "Set category amounts in Settings"
+              }</p>`
       }
       <button type="button" class="btn btn-primary btn-purchase" data-buy>${
         selected?.id === EXTRA_FUNDS_ID ? "Add Funds" : "I purchased"
@@ -427,9 +502,7 @@ export function renderHome(): HTMLElement {
     if (!t.closest(".period-wrap")) closeDrop();
   };
   el.addEventListener("click", onDoc);
-  el.querySelector("[data-toggle-chart]")?.addEventListener("click", () => {
-    void toggleHomeChart();
-  });
+  bindChartToggle(el);
   el.querySelector("[data-buy]")?.addEventListener("click", () => {
     seedPurchasePad("");
     go({ id: "purchase-amount" });
@@ -450,10 +523,17 @@ export function renderCategoryActivity(categoryId: string, periodId?: string): H
   const wheelCat = historyCat ?? wheelCategories().find((c) => c.id === categoryId);
   const cat = wheelCat ?? categoryById(categoryId);
   const lines = snap
-    ? transactionsForSnapshot(snap)
-        .filter((t) => t.categoryId === categoryId)
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .map((t): CategoryActivityLine => ({ id: t.id, amount: t.amount, createdAt: t.createdAt }))
+    ? categoryId === EXTRA_FUNDS_ID
+      ? extraFundsActivityFromTxs(transactionsForSnapshot(snap), historyWheelSlices(snap))
+      : transactionsForSnapshot(snap)
+          .filter((t) => t.categoryId === categoryId)
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map((t): CategoryActivityLine => ({
+            id: t.id,
+            amount: t.amount,
+            createdAt: t.createdAt,
+            kind: t.kind === "in" ? "in" : "out",
+          }))
     : categoryPeriodActivity(categoryId);
   const dateFmt: Intl.DateTimeFormatOptions =
     scale === "year"
@@ -473,18 +553,19 @@ export function renderCategoryActivity(categoryId: string, periodId?: string): H
     return el;
   }
 
-  const spent = wheelCat?.spent ?? lines.reduce((sum, line) => sum + line.amount, 0);
+  const spent = wheelCat?.spent ?? lines.filter((line) => line.kind !== "in").reduce((sum, line) => sum + line.amount, 0);
+  const added = lines.filter((line) => line.kind === "in").reduce((sum, line) => sum + line.amount, 0);
   const envelope = wheelCat?.envelope ?? 0;
   const remaining = wheelCat?.remaining ?? envelope - spent;
+  const extra = categoryId === EXTRA_FUNDS_ID;
+  const extraStats = extra ? extraFundsCardStats({ envelope, spent }, added) : null;
   const rows = lines
     .map((line) => {
-      const label = line.archiveLabel
-        ? `${escapeHtml(line.archiveLabel)}<span class="muted"> · saved ${periodWord === "year" ? "quarter" : periodWord}</span>`
-        : escapeHtml(new Date(line.createdAt).toLocaleDateString("en-US", dateFmt));
+      const label = activityLineLabel(line, dateFmt, periodWord);
       const del = line.archiveLabel
         ? ""
-        : `<button type="button" class="icon-btn icon-btn-danger activity-del" data-del="${escapeHtml(line.id)}" aria-label="Delete purchase">${trashCan}</button>`;
-      return `<div class="tx-row activity-row${line.archiveLabel ? " is-archive" : ""}"><span>${label}</span><span class="activity-row-end"><span>−${formatMoney(line.amount)}</span>${del}</span></div>`;
+        : `<button type="button" class="icon-btn icon-btn-danger activity-del" data-del="${escapeHtml(line.id)}" aria-label="${line.kind === "in" ? "Delete add" : "Delete purchase"}">${trashCan}</button>`;
+      return `<div class="tx-row activity-row${line.archiveLabel ? " is-archive" : ""}"><span>${label}</span><span class="activity-row-end">${txAmountCell(line.kind, line.amount)}${del}</span></div>`;
     })
     .join("");
 
@@ -498,11 +579,17 @@ export function renderCategoryActivity(categoryId: string, periodId?: string): H
         </div>
         <button type="button" class="cat-swatch" data-color-for="${escapeHtml(cat.id)}" style="background:${cat.color}" aria-label="Change color"></button>
       </header>
-      <p class="sub activity-summary">${formatMoney(spent)} spent${
-        envelope > 0 ? ` of ${formatMoney(envelope)} · ${remaining < 0 ? `${formatMoney(-remaining)} over` : `${formatMoney(remaining)} left`}` : ""
+      <p class="sub activity-summary">${
+        extraStats
+          ? `${formatMoney(extraStats.monthFunds)} ${periodWord} funds · ${formatMoney(extraStats.addedFunds)} added · ${formatMoney(extraStats.fundsLost)} lost`
+          : `${formatMoney(spent)} spent${
+              envelope > 0
+                ? ` of ${formatMoney(envelope)} · ${remaining < 0 ? `${formatMoney(-remaining)} over` : `${formatMoney(remaining)} left`}`
+                : ""
+            }`
       }</p>
       <div class="screen-body activity-list">
-        ${rows || `<p class="muted tiny">No purchases yet this ${periodWord}.</p>`}
+        ${rows || `<p class="muted tiny">${extra ? `No Extra Funds activity yet this ${periodWord}.` : `No purchases yet this ${periodWord}.`}</p>`}
       </div>
     </section>`;
   el.querySelector("[data-back]")?.addEventListener("click", () => back());
@@ -524,7 +611,7 @@ export function renderCategoryActivity(categoryId: string, periodId?: string): H
     sheet.className = "over-sheet";
     sheet.innerHTML = `
       <div class="over-card">
-        <h2 class="headline">Delete this ${formatMoney(line.amount)} purchase?</h2>
+        <h2 class="headline">Delete this ${formatMoney(line.amount)} ${line.kind === "in" ? "add" : "purchase"}?</h2>
         <p class="sub">It will be removed from this ${periodWord}.</p>
         <button type="button" class="btn btn-primary btn-xl" data-del-yes>Yes, delete it</button>
         <button type="button" class="btn btn-ghost" data-del-no>Cancel</button>
@@ -941,17 +1028,30 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
   const centerValue = selected ? selected.remaining : periodIncome;
   const graphMode = state.homeChart === "bars";
   const totalBudgeted = totals.budgeted;
-  const shareLabel = selected ? incomeShareLabel(selected.budgeted, monthlyIncome) : "";
+  const shareLabel = selected ? incomeShareLabel(selected.budgeted, monthlyIncome, selected.id) : "";
+  const snapTxs = transactionsForSnapshot(snap);
+  const previewFmt: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  const historyPreview =
+    selected?.id === EXTRA_FUNDS_ID
+      ? extraFundsActivityFromTxs(snapTxs, slices)
+      : snapTxs
+          .filter((t) => t.categoryId === selected?.id)
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map((t): CategoryActivityLine => ({
+            id: t.id,
+            amount: t.amount,
+            createdAt: t.createdAt,
+            kind: t.kind === "in" ? "in" : "out",
+          }));
   const txMarkup = selected
-    ? transactionsForSnapshot(snap)
-        .filter((t) => t.categoryId === selected.id)
-        .sort((a, b) => b.createdAt - a.createdAt)
+    ? historyPreview
         .slice(0, 3)
         .map(
-          (t) =>
-            `<div class="tx-row"><span>${new Date(t.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span><span>−${formatMoney(t.amount)}</span></div>`,
+          (line) =>
+            `<div class="tx-row"><span>${activityLineLabel(line, previewFmt, word)}</span>${txAmountCell(line.kind, line.amount)}</div>`,
         )
-        .join("") || `<p class="muted tiny">No purchases yet this ${word}.</p>`
+        .join("") ||
+      `<p class="muted tiny">${selected.id === EXTRA_FUNDS_ID ? `No Extra Funds activity yet this ${word}.` : `No purchases yet this ${word}.`}</p>`
     : "";
   const graphDetail = graphMode
     ? graphDetailMarkup({
@@ -961,6 +1061,7 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
         periodIncome,
         totalBudgeted,
         periodWord: word,
+        addedFunds: extraInFromTransactions(snapTxs),
       })
     : "";
   const wheelDetail =
@@ -985,22 +1086,22 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
         <div class="home-head-title">
           <h1 class="quarter-title">${escapeHtml(periodLabel(snap))}</h1>
         </div>
-        <button type="button" class="icon-btn home-head-toggle" data-toggle-chart aria-label="${graphMode ? "Show wheel" : "Show graph"}">${graphMode ? wheelIcon : graphIcon}</button>
+        ${chartToggleMarkup(graphMode)}
       </header>
       ${graphDetail}
       ${
         graphMode
           ? budgetChartMarkup(slices, { selectedId: selectedSliceId })
           : `<div class="wheel-wrap">
-        ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true, income: periodIncome })}
+        ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
         ${wheelCenterMarkup({
           label: centerLabel,
           value: formatMoney(centerValue),
           negative: centerValue < 0,
-          subPrimary: selected ? `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}` : `${formatMoney(totalSpent)} spent`,
+          subPrimary: selected ? selectedSliceSub(selected) : `${formatMoney(totalSpent)} spent`,
           subSecondary: selected ? undefined : `of ${formatMoney(totalEnv)} budget`,
         })}
-        ${wheelCornerTotalsMarkup(totals, !selected)}
+        ${wheelCornerTotalsMarkup(totals)}
         ${
           slices.length
             ? `<button type="button" class="wheel-cycle-btn is-left" data-cycle="1" aria-label="Previous category">${backChevron}</button>
@@ -1021,9 +1122,7 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
     </section>`;
 
   el.querySelector("[data-back]")?.addEventListener("click", () => back());
-  el.querySelector("[data-toggle-chart]")?.addEventListener("click", () => {
-    void toggleHomeChart();
-  });
+  bindChartToggle(el);
   el.querySelectorAll<HTMLElement>("[data-slice]").forEach((path) => {
     path.addEventListener("click", () => {
       const id = path.dataset.slice ?? null;
@@ -1117,7 +1216,7 @@ export function renderSettings(): HTMLElement {
           </span>
         </div>
         ${incomeRows}
-        <button type="button" class="income-add" data-extra>
+        <button type="button" class="income-add" id="tour-income" data-extra>
           <span>
             <strong>Add ${incomeSlotLabel(nextIncomeNumber(income))}</strong>
             <span class="muted">Another paycheck or extra cash</span>
@@ -1125,9 +1224,38 @@ export function renderSettings(): HTMLElement {
           <span class="chevron">›</span>
         </button>
       </div>
-      <button type="button" class="settings-row" data-past>
+      <button type="button" class="settings-row" data-appearance>
         <span>
-          <strong>Spending history</strong>
+          <strong>Appearance</strong>
+          <span class="muted">${escapeHtml(themeLabel())}</span>
+        </span>
+        <span class="chevron">›</span>
+      </button>
+      <button type="button" class="settings-row" id="tour-widget" data-widget>
+        <span>
+          <strong>Add Widget</strong>
+          <span class="muted">Home-screen wheel. Log purchases from there.</span>
+        </span>
+        <span class="chevron">›</span>
+      </button>
+      <button type="button" class="settings-row" id="tour-history" data-past>
+        <span>
+          <strong>Spending History</strong>
+          <span class="muted">Past months, and download</span>
+        </span>
+        <span class="chevron">›</span>
+      </button>
+      <button type="button" class="settings-row" data-rate>
+        <span>
+          <strong>Rate Budget Wheel</strong>
+          <span class="muted">Open the Play Store listing</span>
+        </span>
+        <span class="chevron">›</span>
+      </button>
+      <button type="button" class="settings-row" data-help>
+        <span>
+          <strong>Help</strong>
+          <span class="muted">FAQ and contact</span>
         </span>
         <span class="chevron">›</span>
       </button>
@@ -1142,7 +1270,7 @@ export function renderSettings(): HTMLElement {
         <p>Take-home is an estimate (single filer, no local tax). The wheel is monthly unless you change it on the home screen. Category budgets stay month to month. Spending starts over on the 1st. Every closed month, quarter, and year stays under Spending history on this device until you delete it.</p>
       </div>
       <div class="settings-reset-wrap">
-        <button type="button" class="btn btn-ghost btn-danger settings-reset" data-reset>Reset budget data</button>
+        <button type="button" class="btn btn-ghost btn-danger settings-reset" data-reset>Reset Budget Data</button>
       </div>
       </div>
       ${navBar("settings")}
@@ -1180,8 +1308,119 @@ export function renderSettings(): HTMLElement {
   el.querySelector("[data-extra]")?.addEventListener("click", () => {
     go({ id: "extra-income" });
   });
+  el.querySelector("[data-appearance]")?.addEventListener("click", () => {
+    el.querySelector(".over-sheet")?.remove();
+    const sheet = document.createElement("div");
+    sheet.className = "over-sheet";
+    const on = state.theme;
+    sheet.innerHTML = `
+      <div class="over-card">
+        <p class="brand-mini">Appearance</p>
+        <h2 class="headline">How the wheel looks</h2>
+        <p class="sub">Dark is the default. Light and System stay on this device.</p>
+        <div class="choice-stack">
+          <button type="button" class="choice-card${on === "dark" ? " is-on" : ""}" data-theme="dark">
+            <span class="choice-title">Dark</span>
+            <span class="choice-sub">Near-black canvas. Easier at night.</span>
+          </button>
+          <button type="button" class="choice-card${on === "light" ? " is-on" : ""}" data-theme="light">
+            <span class="choice-title">Light</span>
+            <span class="choice-sub">Paper-warm. The wheel keeps the same colors.</span>
+          </button>
+          <button type="button" class="choice-card${on === "system" ? " is-on" : ""}" data-theme="system">
+            <span class="choice-title">System default</span>
+            <span class="choice-sub">Follow this phone’s light or dark setting.</span>
+          </button>
+        </div>
+        <button type="button" class="btn btn-ghost" data-close>Done</button>
+      </div>`;
+    el.querySelector(".screen")?.append(sheet);
+    sheet.querySelector("[data-close]")?.addEventListener("click", () => sheet.remove());
+    sheet.addEventListener("click", (ev) => {
+      if (ev.target === sheet) sheet.remove();
+    });
+    sheet.querySelectorAll<HTMLButtonElement>("[data-theme]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const next = btn.dataset.theme === "light" || btn.dataset.theme === "system" ? btn.dataset.theme : "dark";
+        await setTheme(next);
+      });
+    });
+  });
+  el.querySelector("[data-widget]")?.addEventListener("click", async () => {
+    const result = await pinHomeWidget();
+    if (result === "pinned") return;
+    el.querySelector(".over-sheet")?.remove();
+    const sheet = document.createElement("div");
+    sheet.className = "over-sheet";
+    sheet.innerHTML = `
+      <div class="over-card">
+        <p class="brand-mini">Add Widget</p>
+        <h2 class="headline">Put the wheel on your home screen</h2>
+        <p class="sub">Long-press your home screen, then open Widgets and choose Budget Wheel.</p>
+        <p class="sub">You’ll see what’s left this month, and you can log a purchase, without opening the app.</p>
+        <button type="button" class="btn btn-primary btn-xl" data-widget-ok>Got it</button>
+      </div>`;
+    el.querySelector(".screen")?.append(sheet);
+    sheet.querySelector("[data-widget-ok]")?.addEventListener("click", () => sheet.remove());
+    sheet.addEventListener("click", (ev) => {
+      if (ev.target === sheet) sheet.remove();
+    });
+  });
   el.querySelector("[data-past]")?.addEventListener("click", () => {
     go({ id: "past-quarter" });
+  });
+  el.querySelector("[data-rate]")?.addEventListener("click", () => {
+    openPlayStore();
+  });
+  el.querySelector("[data-help]")?.addEventListener("click", () => {
+    el.querySelector(".over-sheet")?.remove();
+    const sheet = document.createElement("div");
+    sheet.className = "over-sheet";
+    sheet.innerHTML = `
+      <div class="over-card help-card">
+        <p class="brand-mini">Help</p>
+        <h2 class="headline">How the wheel works</h2>
+        <details class="faq">
+          <summary>Add a Slice</summary>
+          <p>Open Categories, then Other. Or tap a slice and tidy the name or color.</p>
+        </details>
+        <details class="faq">
+          <summary>Switch Views</summary>
+          <p>Tap the wheel or graph icon in the top right. Same money, two views.</p>
+        </details>
+        <details class="faq">
+          <summary>Add Income</summary>
+          <p>Settings → Add another paycheck. Extra income resizes what the wheel can hold. It does not import paychecks.</p>
+        </details>
+        <details class="faq">
+          <summary>Add Widget</summary>
+          <p>Settings → Add Widget. That pins Budget Wheel to your home screen. You can also log purchases from the widget.</p>
+        </details>
+        <details class="faq">
+          <summary>Spending History</summary>
+          <p>When a month ends, it stays under Spending History. Open a past month, or download a picture and a CSV from there.</p>
+        </details>
+        <button type="button" class="settings-row" data-contact>
+          <span>
+            <strong>Contact</strong>
+            <span class="muted">Play Store listing for Budget Wheel</span>
+          </span>
+          <span class="chevron">›</span>
+        </button>
+        <button type="button" class="btn btn-ghost" data-close>Close</button>
+        <button type="button" class="btn btn-ghost help-replay" data-replay>Replay Tour</button>
+      </div>`;
+    el.querySelector(".screen")?.append(sheet);
+    sheet.querySelector("[data-close]")?.addEventListener("click", () => sheet.remove());
+    sheet.querySelector("[data-replay]")?.addEventListener("click", () => {
+      startTour({ replay: true });
+    });
+    sheet.querySelector("[data-contact]")?.addEventListener("click", () => {
+      openPlayStore();
+    });
+    sheet.addEventListener("click", (ev) => {
+      if (ev.target === sheet) sheet.remove();
+    });
   });
   el.querySelector("[data-privacy]")?.addEventListener("click", () => {
     el.querySelector(".over-sheet")?.remove();

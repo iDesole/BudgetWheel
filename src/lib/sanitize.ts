@@ -1,7 +1,17 @@
 import { createDefaultCategories, ensureDefaultCategories, retireDebtPayments } from "./categories.ts";
 import { clampMoney } from "./money.ts";
 import { MONTH_ID_RE, QUARTER_ID_RE, YEAR_ID_RE } from "./quarter.ts";
-import type { Category, HistoryScale, Income, IncomeSource, PersistedState, Transaction, WheelSnapshot } from "../types.ts";
+import type {
+  Category,
+  HistoryScale,
+  Income,
+  IncomeSource,
+  PersistedState,
+  ReviewPromptState,
+  ThemePref,
+  Transaction,
+  WheelSnapshot,
+} from "../types.ts";
 
 const SAFE_ID = /^[A-Za-z0-9_:-]{1,64}$/;
 const SAFE_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -92,6 +102,7 @@ function sanitizeTransaction(raw: unknown, index: number): Transaction | null {
     categoryId,
     amount,
     createdAt: Math.max(0, finiteNumber(o.createdAt, Date.now())),
+    kind: o.kind === "in" ? "in" : "out",
   };
 }
 
@@ -106,6 +117,20 @@ function defaultPeriodMonths(scale: HistoryScale): number {
   if (scale === "year") return 12;
   if (scale === "month") return 1;
   return 3;
+}
+
+function sanitizeTheme(value: unknown): ThemePref {
+  return value === "light" || value === "system" ? value : "dark";
+}
+
+function sanitizeReview(value: unknown): ReviewPromptState {
+  return value === "shown" || value === "rated" || value === "declined" || value === "never"
+    ? value
+    : "not_asked";
+}
+
+function sanitizeDay(value: unknown): string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
 }
 
 function sanitizeSnapshot(raw: unknown): WheelSnapshot | null {
@@ -152,9 +177,11 @@ export function sanitizeState(raw: unknown): PersistedState | null {
     : [];
   const migrated = retireDebtPayments(cats, txs);
   const period = Math.round(finiteNumber(o.periodMonths, 3));
+  const onboarded = Boolean(o.onboardingComplete);
+  const legacyOnboarded = onboarded && o.tutorialComplete === undefined && o.firstSetupAt === undefined;
   return {
     version: 1,
-    onboardingComplete: Boolean(o.onboardingComplete),
+    onboardingComplete: onboarded,
     income: sanitizeIncome(o.income),
     categories: ensureDefaultCategories(
       migrated.categories.length ? migrated.categories.slice(0, 40) : createDefaultCategories(),
@@ -179,6 +206,13 @@ export function sanitizeState(raw: unknown): PersistedState | null {
       : [],
     wheelScale: o.wheelScale === "quarter" || o.wheelScale === "year" ? o.wheelScale : "month",
     homeChart: o.homeChart === "bars" ? "bars" : "wheel",
+    theme: sanitizeTheme(o.theme),
+    tutorialComplete: legacyOnboarded ? true : Boolean(o.tutorialComplete),
+    tutorialReplayedAt: Math.max(0, finiteNumber(o.tutorialReplayedAt)),
+    firstSetupAt: Math.max(0, finiteNumber(o.firstSetupAt, legacyOnboarded ? finiteNumber(o.updatedAt) : 0)),
+    reviewPromptState: sanitizeReview(o.reviewPromptState),
+    openDayCount: Math.max(0, Math.round(finiteNumber(o.openDayCount))),
+    lastOpenDay: sanitizeDay(o.lastOpenDay),
     updatedAt: Math.max(0, finiteNumber(o.updatedAt)),
   };
 }

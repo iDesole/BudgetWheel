@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.util.TypedValue
@@ -16,6 +17,7 @@ import com.budgetwheel.app.MainActivity
 import com.budgetwheel.app.R
 import com.budgetwheel.app.WheelRenderer
 import java.util.Locale
+import kotlin.math.max
 
 /**
  * Home-screen AppWidget. Always this month's wheel or graph, not spending history.
@@ -155,27 +157,143 @@ class WheelWidgetProvider : AppWidgetProvider() {
 
         fun render(context: Context, manager: AppWidgetManager, id: Int) {
             val store = BudgetStore(context)
-            val views = when (store.widgetPhase(id)) {
+            val size = widgetSize(manager, id)
+            val views = if (size != "full") {
+                compactViews(context, store, manager, id, wide = size == "wide")
+            } else when (store.widgetPhase(id)) {
                 BudgetStore.PHASE_AMOUNT -> padViews(context, store, id)
                 BudgetStore.PHASE_CATEGORY -> catViews(context, store, id)
                 else -> wheelViews(context, store, id)
             }
             manager.updateAppWidget(id, views)
-            if (store.widgetPhase(id) == BudgetStore.PHASE_CATEGORY) {
+            if (size == "full" && store.widgetPhase(id) == BudgetStore.PHASE_CATEGORY) {
                 manager.notifyAppWidgetViewDataChanged(id, R.id.widget_cat_list)
             }
-            if (store.widgetPhase(id) == BudgetStore.PHASE_WHEEL && store.chartMode(id) == "bars") {
+            if (size == "full" && store.widgetPhase(id) == BudgetStore.PHASE_WHEEL && store.chartMode(id) == "bars") {
                 manager.notifyAppWidgetViewDataChanged(id, R.id.widget_graph_list)
             }
         }
 
+        /** 2×2 compact, 4×2 wide, otherwise the full wheel / graph / purchase pad. */
+        private fun widgetSize(manager: AppWidgetManager, id: Int): String {
+            val opts = manager.getAppWidgetOptions(id)
+            val minW = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250)
+            val minH = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 250)
+            return when {
+                minH < 160 && minW < 180 -> "compact"
+                minH < 160 -> "wide"
+                else -> "full"
+            }
+        }
+
+        private fun widgetLight(context: Context, store: BudgetStore): Boolean {
+            val pref = store.themePref()
+            if (pref == "light") return true
+            if (pref == "dark") return false
+            val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            return night == Configuration.UI_MODE_NIGHT_NO
+        }
+
+        private fun applyChrome(context: Context, store: BudgetStore, views: RemoteViews) {
+            val light = widgetLight(context, store)
+            views.setInt(
+                R.id.widget_root,
+                "setBackgroundResource",
+                if (light) R.drawable.widget_bg_light else R.drawable.widget_bg,
+            )
+        }
+
+        private fun compactViews(
+            context: Context,
+            store: BudgetStore,
+            manager: AppWidgetManager,
+            id: Int,
+            wide: Boolean,
+        ): RemoteViews {
+            val views = RemoteViews(
+                context.packageName,
+                if (wide) R.layout.widget_compact_wide else R.layout.widget_compact,
+            )
+            applyChrome(context, store, views)
+            val ready = store.onboarded()
+            val left = store.budgetLeft()
+            val over = left < 0
+            val on = context.getColor(if (widgetLight(context, store)) R.color.bw_on_light else R.color.bw_on)
+            val soft = context.getColor(if (widgetLight(context, store)) R.color.bw_soft_light else R.color.bw_soft)
+            val err = context.getColor(R.color.bw_error)
+            views.setTextViewText(R.id.widget_left, if (ready) BudgetStore.money(if (over) -left else left) else "")
+            views.setTextColor(R.id.widget_left, if (over) err else on)
+            views.setTextViewText(
+                R.id.widget_left_lbl,
+                context.getString(if (over) R.string.widget_stat_over else R.string.widget_left_month),
+            )
+            views.setTextColor(R.id.widget_left_lbl, soft)
+            views.setOnClickPendingIntent(R.id.widget_root, openApp(context, id))
+            views.setOnClickPendingIntent(R.id.widget_wheel, openApp(context, id))
+            if (ready) {
+                views.setImageViewBitmap(
+                    R.id.widget_wheel,
+                    WheelRenderer.draw(
+                        store.slices(),
+                        compactWheelPx(context, manager, id, wide),
+                        store.wheelCenter(null),
+                        null,
+                        showCenter = false,
+                    ),
+                )
+                bindTicks(context, store, views)
+            }
+            return views
+        }
+
+        private fun bindTicks(context: Context, store: BudgetStore, views: RemoteViews) {
+            val ids = intArrayOf(
+                R.id.widget_tick_0,
+                R.id.widget_tick_1,
+                R.id.widget_tick_2,
+                R.id.widget_tick_3,
+                R.id.widget_tick_4,
+                R.id.widget_tick_5,
+                R.id.widget_tick_6,
+                R.id.widget_tick_7,
+            )
+            val slices = store.assignedSlices().take(ids.size)
+            ids.forEachIndexed { i, viewId ->
+                if (i < slices.size) {
+                    views.setViewVisibility(viewId, View.VISIBLE)
+                    views.setImageViewBitmap(viewId, WidgetBitmaps.swatch(context, slices[i].color))
+                } else {
+                    views.setViewVisibility(viewId, View.GONE)
+                }
+            }
+        }
+
+        private fun compactWheelPx(context: Context, manager: AppWidgetManager, id: Int, wide: Boolean): Int {
+            val opts = manager.getAppWidgetOptions(id)
+            val minW = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 110)
+            val minH = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
+            val wheelDp = if (wide) {
+                kotlin.math.min(minH - 16, minW / 2).coerceIn(72, 160)
+            } else {
+                kotlin.math.min(minW, minH).minus(36).coerceIn(72, 140)
+            }
+            val px = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP,
+                wheelDp.toFloat(),
+                context.resources.displayMetrics,
+            ).toInt()
+            return (px * 2).coerceIn(240, 640)
+        }
+
         private fun wheelViews(context: Context, store: BudgetStore, id: Int): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_wheel)
+            applyChrome(context, store, views)
             val ready = store.onboarded()
             val selected = store.selectedSlice(id)
             val graph = ready && store.chartMode(id) == "bars"
             val hasSlices = ready && store.slices().isNotEmpty()
             views.setViewVisibility(R.id.widget_wheel_wrap, if (ready && !graph) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.widget_graph_list_wrap, if (graph) View.VISIBLE else View.GONE)
             views.setViewVisibility(R.id.widget_graph_list, if (graph) View.VISIBLE else View.GONE)
             views.setViewVisibility(R.id.widget_graph_detail, if (graph) View.VISIBLE else View.GONE)
             views.setViewVisibility(R.id.widget_empty, if (ready) View.GONE else View.VISIBLE)
@@ -211,13 +329,12 @@ class WheelWidgetProvider : AppWidgetProvider() {
                         R.id.widget_wheel,
                         WheelRenderer.draw(
                             store.slices(),
-                            store.income(),
                             wheelSizePx(context, AppWidgetManager.getInstance(context), id),
                             store.wheelCenter(selected),
                             selected,
                         ),
                     )
-                    bindWheelCorner(context, store, views, selected)
+                    bindWheelCorner(context, store, views)
                     views.setOnClickPendingIntent(R.id.widget_wheel, action(context, id, OP_CLEAR, 9))
                     views.setOnClickPendingIntent(R.id.widget_cycle_left, action(context, id, OP_CYCLE, 5, "1"))
                     views.setOnClickPendingIntent(R.id.widget_cycle_right, action(context, id, OP_CYCLE, 6, "-1"))
@@ -242,17 +359,13 @@ class WheelWidgetProvider : AppWidgetProvider() {
             context: Context,
             store: BudgetStore,
             views: RemoteViews,
-            selected: String?,
         ) {
-            if (selected != null) {
-                views.setViewVisibility(R.id.widget_wheel_corner, View.GONE)
-                return
-            }
             val assigned = store.assignedSlices()
             val left = assigned.sumOf { it.envelope } - assigned.sumOf { it.spent }
             val over = left < 0
             val oob = store.outOfBudgetSpend()
             views.setViewVisibility(R.id.widget_wheel_corner, View.VISIBLE)
+            views.setViewVisibility(R.id.widget_wheel_left_wrap, View.VISIBLE)
             views.setTextViewText(R.id.widget_wheel_oob_val, BudgetStore.money(oob))
             views.setTextColor(
                 R.id.widget_wheel_oob_val,
@@ -284,11 +397,12 @@ class WheelWidgetProvider : AppWidgetProvider() {
             val envelope: Double
             val spent: Double
             val budgeted: Double
+            val left: Double
             var outOfBudget = 0.0
             if (slice != null) {
                 views.setViewVisibility(R.id.widget_graph_swatch, View.VISIBLE)
                 views.setViewVisibility(R.id.widget_graph_income, View.GONE)
-                views.setViewVisibility(R.id.widget_stat_oob_wrap, View.GONE)
+                views.setViewVisibility(R.id.widget_graph_oob_head, View.GONE)
                 views.setImageViewBitmap(R.id.widget_graph_swatch, WidgetBitmaps.swatch(context, slice.color))
                 views.setTextViewText(R.id.widget_graph_name, slice.name)
                 views.setTextViewTextSize(R.id.widget_graph_name, TypedValue.COMPLEX_UNIT_SP, 15f)
@@ -298,10 +412,11 @@ class WheelWidgetProvider : AppWidgetProvider() {
                 envelope = slice.envelope
                 spent = slice.spent
                 budgeted = slice.budgeted
+                left = envelope - spent
             } else {
                 views.setViewVisibility(R.id.widget_graph_swatch, View.GONE)
                 views.setViewVisibility(R.id.widget_graph_income, View.GONE)
-                views.setViewVisibility(R.id.widget_stat_oob_wrap, View.VISIBLE)
+                views.setViewVisibility(R.id.widget_graph_oob_head, View.VISIBLE)
                 views.setTextViewText(R.id.widget_graph_name, context.getString(R.string.widget_income_title))
                 views.setTextViewTextSize(R.id.widget_graph_name, TypedValue.COMPLEX_UNIT_SP, 12f)
                 views.setTextColor(R.id.widget_graph_name, context.getColor(R.color.bw_soft))
@@ -310,13 +425,16 @@ class WheelWidgetProvider : AppWidgetProvider() {
                 views.setTextColor(R.id.widget_graph_share, context.getColor(R.color.bw_on))
                 val assigned = store.assignedSlices()
                 envelope = assigned.sumOf { it.envelope }
-                spent = assigned.sumOf { it.spent }
-                budgeted = assigned.sumOf { it.budgeted }
                 outOfBudget = store.outOfBudgetSpend()
+                spent = store.totalSpend()
+                budgeted = assigned.sumOf { it.budgeted }
+                left = envelope - assigned.sumOf { it.spent }
             }
             val income = store.monthlyIncome()
             if (slice != null) {
-                val share = if (budgeted > 0) {
+                val share = if (slice.id == BudgetStore.EXTRA_FUNDS_ID) {
+                    context.getString(R.string.widget_extra_funds_share)
+                } else if (budgeted > 0) {
                     val pct = if (income > 0) budgeted / income * 100.0 else 0.0
                     context.getString(R.string.widget_of_income, String.format(Locale.US, "%.0f%%", pct))
                 } else {
@@ -324,27 +442,48 @@ class WheelWidgetProvider : AppWidgetProvider() {
                 }
                 views.setTextViewText(R.id.widget_graph_share, share)
             }
-            views.setTextViewText(
-                R.id.widget_stat_budgeted,
-                if (envelope > 0) BudgetStore.money(envelope) else "—",
-            )
-            views.setTextViewText(R.id.widget_stat_spent, BudgetStore.money(spent))
-            views.setTextViewText(R.id.widget_stat_oob, BudgetStore.money(outOfBudget))
+            views.setTextViewText(R.id.widget_graph_oob_head_val, BudgetStore.money(outOfBudget))
             views.setTextColor(
-                R.id.widget_stat_oob,
+                R.id.widget_graph_oob_head_val,
                 context.getColor(if (outOfBudget > 0.009) R.color.bw_error else R.color.bw_on),
             )
-            val left = envelope - spent
-            val over = left < 0
-            views.setTextViewText(R.id.widget_stat_left, BudgetStore.money(if (over) -left else left))
-            views.setTextColor(
-                R.id.widget_stat_left,
-                context.getColor(if (over) R.color.bw_error else R.color.bw_on),
-            )
-            views.setTextViewText(
-                R.id.widget_stat_left_lbl,
-                context.getString(if (over) R.string.widget_stat_over else R.string.widget_stat_left),
-            )
+            if (slice?.id == BudgetStore.EXTRA_FUNDS_ID) {
+                val added = store.extraFundsAdded()
+                val monthFunds = max(0.0, slice.envelope - added)
+                views.setTextViewText(R.id.widget_stat_budgeted, BudgetStore.money(monthFunds))
+                views.setTextViewText(R.id.widget_stat_budgeted_lbl, context.getString(R.string.widget_stat_month_funds))
+                views.setTextViewText(R.id.widget_stat_spent, BudgetStore.money(added))
+                views.setTextViewText(R.id.widget_stat_spent_lbl, context.getString(R.string.widget_stat_added_funds))
+                views.setTextColor(
+                    R.id.widget_stat_spent,
+                    context.getColor(if (added > 0.009) R.color.bw_primary else R.color.bw_on),
+                )
+                views.setTextViewText(R.id.widget_stat_left, BudgetStore.money(slice.spent))
+                views.setTextViewText(R.id.widget_stat_left_lbl, context.getString(R.string.widget_stat_funds_lost))
+                views.setTextColor(
+                    R.id.widget_stat_left,
+                    context.getColor(if (slice.spent > 0.009) R.color.bw_error else R.color.bw_on),
+                )
+            } else {
+                val over = left < 0
+                views.setTextViewText(
+                    R.id.widget_stat_budgeted,
+                    if (envelope > 0) BudgetStore.money(envelope) else "—",
+                )
+                views.setTextViewText(R.id.widget_stat_budgeted_lbl, context.getString(R.string.widget_stat_budgeted))
+                views.setTextViewText(R.id.widget_stat_spent, BudgetStore.money(spent))
+                views.setTextViewText(R.id.widget_stat_spent_lbl, context.getString(R.string.widget_stat_spent))
+                views.setTextColor(R.id.widget_stat_spent, context.getColor(R.color.bw_on))
+                views.setTextViewText(R.id.widget_stat_left, BudgetStore.money(if (over) -left else left))
+                views.setTextColor(
+                    R.id.widget_stat_left,
+                    context.getColor(if (over) R.color.bw_error else R.color.bw_on),
+                )
+                views.setTextViewText(
+                    R.id.widget_stat_left_lbl,
+                    context.getString(if (over) R.string.widget_stat_over else R.string.widget_stat_left),
+                )
+            }
         }
 
         private fun padViews(context: Context, store: BudgetStore, id: Int): RemoteViews {

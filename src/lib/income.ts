@@ -1,6 +1,7 @@
-import type { Income, IncomeDraft, IncomeSource, TaxBreakdown } from "../types.ts";
+import type { Income, IncomeDraft, IncomeSource, TaxBreakdown, Transaction } from "../types.ts";
+import { EXTRA_FUNDS_ID } from "./categories.ts";
 import { estimateStateIncomeTax, findState } from "./states.ts";
-import { clampMoney } from "./money.ts";
+import { clampMoney, uid } from "./money.ts";
 
 const NAMED_ORDINALS = ["", "First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
 
@@ -13,7 +14,14 @@ export function incomeOrdinal(n: number): string {
   return `${n}${suffix}`;
 }
 
+export const ADDED_FUNDS_SOURCE_ID = "inc_added_funds";
+
 export function listedSources(income: Income | null | undefined): IncomeSource[] {
+  return rawSources(income).filter((s) => s.id !== ADDED_FUNDS_SOURCE_ID);
+}
+
+/** Every stored source, including the retired Extra Funds income row. */
+export function rawSources(income: Income | null | undefined): IncomeSource[] {
   if (!income) return [];
   if (income.sources?.length) return income.sources;
   return [
@@ -40,17 +48,54 @@ export function nextIncomeNumber(income: Income | null | undefined): number {
   return listedSources(income).length + 1;
 }
 
-export const ADDED_FUNDS_SOURCE_ID = "inc_added_funds";
-
 export function isSideSource(source: Pick<IncomeSource, "kind" | "type">): boolean {
   return source.kind === "side" || source.type === "side";
 }
 
 export function sourceTypeLabel(source: IncomeSource): string {
-  if (source.id === ADDED_FUNDS_SOURCE_ID) return "Added extra funds";
   if (isSideSource(source)) return "Side · after tax";
   if (source.type === "hourly") return "Hourly";
   return source.salaryPeriod === "monthly" ? "Monthly salary" : "Salary";
+}
+
+/**
+ * Extra Funds is not an income source. Turn the old `inc_added_funds` row
+ * into Extra Funds `kind:"in"` activity and drop it from Settings.
+ */
+export function peelAddedFunds(
+  income: Income | null,
+  transactions: Transaction[],
+): { income: Income | null; transactions: Transaction[] } {
+  if (!income) return { income, transactions };
+  const sources = income.sources?.length ? income.sources : rawSources(income);
+  const added = sources.find((s) => s.id === ADDED_FUNDS_SOURCE_ID);
+  if (!added) return { income, transactions };
+  const amount = clampMoney(added.monthlyTakeHome);
+  const nextSources = sources.filter((s) => s.id !== ADDED_FUNDS_SOURCE_ID);
+  const nextIncome: Income = {
+    ...income,
+    monthlyGross: clampMoney(income.monthlyGross - amount),
+    monthlyTakeHome: clampMoney(income.monthlyTakeHome - amount),
+    sources: nextSources,
+  };
+  const existingIn = transactions
+    .filter((t) => t.kind === "in" && t.categoryId === EXTRA_FUNDS_ID)
+    .reduce((sum, t) => sum + t.amount, 0);
+  const missing = clampMoney(amount - existingIn);
+  const txs =
+    missing > 0.009
+      ? [
+          ...transactions,
+          {
+            id: uid("tx"),
+            categoryId: EXTRA_FUNDS_ID,
+            amount: missing,
+            createdAt: Date.now(),
+            kind: "in" as const,
+          },
+        ]
+      : transactions;
+  return { income: nextIncome, transactions: txs };
 }
 
 export function normalizeSourceKinds(sources: IncomeSource[]): IncomeSource[] {
