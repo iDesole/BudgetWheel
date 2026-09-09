@@ -528,7 +528,7 @@ input {
 .logo-mark {
   width: 88px;
   height: 88px;
-  border-radius: 24%;
+  border-radius: 50%;
   object-fit: cover;
   display: block;
 }
@@ -1481,7 +1481,11 @@ input {
 }
 
 :root[data-theme="light"] .wheel-wrap::before {
-  background: radial-gradient(circle, rgba(60, 48, 20, 0.08) 0%, transparent 70%);
+  content: none;
+}
+
+:root[data-theme="light"] .wheel-depth {
+  filter: none;
 }
 
 .wheel-svg {
@@ -1603,7 +1607,6 @@ input {
 
 :root[data-theme="light"] .wheel-center {
   background: var(--bg);
-  box-shadow: 0 0 22px 12px var(--bg);
 }
 
 .wheel-center-label {
@@ -2407,9 +2410,7 @@ body.is-tour:not(.tour-step-3) .home-head-toggle {
 
   :root[data-theme="light"] body,
   [data-theme="light"] body {
-    background:
-      radial-gradient(circle at top, #efe3c4, transparent 42%),
-      var(--bg);
+    background: var(--bg);
   }
 
   #app {

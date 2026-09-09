@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -12,6 +13,7 @@ import android.os.Bundle
 import android.os.Looper
 import android.view.View
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -21,6 +23,7 @@ import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewAssetLoader
 import com.budgetwheel.app.widget.WheelWidgetProvider
@@ -35,6 +38,7 @@ import com.budgetwheel.app.widget.WheelWidgetProvider
  * No INTERNET — assets load from the APK via WebViewAssetLoader.
  */
 class MainActivity : AppCompatActivity() {
+    private lateinit var root: View
     private lateinit var web: WebView
     private lateinit var store: BudgetStore
     private val budgetWatch =
@@ -49,7 +53,19 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (Build.VERSION.SDK_INT >= 28) {
+            val attrs = window.attributes
+            attrs.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            window.attributes = attrs
+        }
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
         setContentView(R.layout.activity_main)
+        root = findViewById(R.id.root)
         web = findViewById(R.id.web)
         store = BudgetStore(this)
         store.watchBudget(budgetWatch)
@@ -60,13 +76,15 @@ class MainActivity : AppCompatActivity() {
 
         web.setBackgroundColor(Color.parseColor("#0D0C10"))
         web.overScrollMode = View.OVER_SCROLL_NEVER
-        ViewCompat.setOnApplyWindowInsetsListener(web) { v, insets ->
+        // Inset the host view. WebView ignores its own padding.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
             )
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
+            WindowInsetsCompat.CONSUMED
         }
+        ViewCompat.requestApplyInsets(root)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
@@ -74,6 +92,7 @@ class MainActivity : AppCompatActivity() {
         web.settings.setSupportZoom(false)
         web.settings.displayZoomControls = false
         web.settings.mediaPlaybackRequiresUserGesture = true
+        applyDisplaySettings()
         web.addJavascriptInterface(Bridge(store), "BudgetWheelAndroid")
         web.webChromeClient = WebChromeClient()
         web.webViewClient = object : WebViewClient() {
@@ -97,6 +116,10 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
+                view.evaluateJavascript(
+                    "(function(){var r=document.documentElement;r.style.setProperty('--safe-top','0px');r.style.setProperty('--safe-bot','0px');r.style.setProperty('--safe-left','0px');r.style.setProperty('--safe-right','0px');})()",
+                    null,
+                )
                 pullBudgetIntoApp()
                 WheelWidgetProvider.refreshAll(this@MainActivity)
             }
@@ -122,8 +145,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (this::root.isInitialized) ViewCompat.requestApplyInsets(root)
+        applyDisplaySettings()
         pullBudgetIntoApp()
         WheelWidgetProvider.refreshAll(this)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyDisplaySettings()
+        if (this::root.isInitialized) ViewCompat.requestApplyInsets(root)
     }
 
     override fun onDestroy() {
@@ -208,10 +239,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun applyDisplaySettings() {
+        if (!this::web.isInitialized) return
+        val zoom = (resources.configuration.fontScale * 100f).toInt().coerceIn(100, 185)
+        web.settings.textZoom = zoom
+    }
+
     private fun applyChrome(light: Boolean) {
         val color = if (light) Color.parseColor("#F3EFE6") else Color.parseColor("#0D0C10")
         window.statusBarColor = color
         window.navigationBarColor = color
+        if (this::root.isInitialized) root.setBackgroundColor(color)
+        web.setBackgroundColor(color)
         if (Build.VERSION.SDK_INT >= 30) {
             val flags =
                 WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or

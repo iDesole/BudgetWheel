@@ -18,4 +18,7 @@
     <color name="bw_soft_light">#5C5748</color>
     <color name="bw_outline_light">#D4CDB8</color>
     <color name="bw_primary_light">#8A6A00</color>
+    <color name="bw_surface_light">#FFFDF8</color>
+    <color name="bw_surface2_light">#ECE6D8</color>
+    <color name="bw_error_light">#BA1A1A</color>
 </resources>

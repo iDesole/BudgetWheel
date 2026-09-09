@@ -1,0 +1,20 @@
+BUDGET WHEEL — PLAY CONSOLE RELEASE
+Paste into Play Console > Test and release > Production (or testing) > Create release.
+
+================================================================
+Release name
+================================================================
+1.1.1
+
+================================================================
+Release notes (en-US) — What’s new
+Play limit: 500 characters
+================================================================
+Light mode, icon, and home-screen widget polish.
+
+• Light appearance is a plain paper look — no extra glow
+• App icon is the wheel on black
+• Layout clears the camera hole, clock, and battery on every phone
+• Light home-screen widget matches the app
+
+Privacy is unchanged: everything stays on this device.

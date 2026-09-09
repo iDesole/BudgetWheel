@@ -36,14 +36,20 @@ class GraphRemoteService : RemoteViewsService() {
         override fun getViewAt(position: Int): RemoteViews {
             val row = rows.getOrNull(position) ?: return RemoteViews(context.packageName, R.layout.widget_graph_row)
             val views = RemoteViews(context.packageName, R.layout.widget_graph_row)
+            val store = BudgetStore(context)
+            val light = store.isLightTheme(context)
             views.setInt(
                 R.id.graph_row,
                 "setBackgroundResource",
-                if (row.id == selectedId) R.drawable.widget_bar_card_on else R.drawable.widget_bar_card,
+                when {
+                    row.id == selectedId && light -> R.drawable.widget_bar_card_on_light
+                    row.id == selectedId -> R.drawable.widget_bar_card_on
+                    light -> R.drawable.widget_bar_card_light
+                    else -> R.drawable.widget_bar_card
+                },
             )
-            val store = BudgetStore(context)
-            val on = context.getColor(if (store.isLightTheme(context)) R.color.bw_on_light else R.color.bw_on)
-            val soft = context.getColor(if (store.isLightTheme(context)) R.color.bw_soft_light else R.color.bw_soft)
+            val on = context.getColor(if (light) R.color.bw_on_light else R.color.bw_on)
+            val soft = context.getColor(if (light) R.color.bw_soft_light else R.color.bw_soft)
             views.setTextViewText(R.id.bar_name, row.name)
             views.setTextColor(R.id.bar_name, on)
             val extra = row.id == BudgetStore.EXTRA_FUNDS_ID
@@ -76,7 +82,11 @@ class GraphRemoteService : RemoteViewsService() {
                 R.id.bar_left,
                 if (left < 0) context.getColor(R.color.bw_warn) else soft,
             )
-            val fill = if (over) context.getColor(R.color.bw_error) else WidgetBitmaps.color(row.color)
+            val fill = if (over) {
+                context.getColor(if (light) R.color.bw_error_light else R.color.bw_error)
+            } else {
+                WidgetBitmaps.color(row.color)
+            }
             views.setImageViewBitmap(R.id.bar_track, WidgetBitmaps.bar(context, fill, pct.toFloat()))
             val tap = Intent()
             tap.putExtra(WheelWidgetProvider.EXTRA_OP, WheelWidgetProvider.OP_GRAPH)

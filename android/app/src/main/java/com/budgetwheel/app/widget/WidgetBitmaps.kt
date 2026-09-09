@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.TypedValue
+import com.budgetwheel.app.BudgetStore
 import com.budgetwheel.app.R
 
 /**
@@ -33,7 +34,9 @@ object WidgetBitmaps {
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG)
         stroke.style = Paint.Style.STROKE
         stroke.strokeWidth = border
-        stroke.color = context.getColor(R.color.bw_surface4)
+        stroke.color = context.getColor(
+            if (BudgetStore(context).isLightTheme(context)) R.color.bw_outline_light else R.color.bw_surface4,
+        )
         val r = cx - border
         canvas.drawCircle(cx, cx, r, fill)
         canvas.drawCircle(cx, cx, r, stroke)
@@ -47,7 +50,9 @@ object WidgetBitmaps {
         val canvas = Canvas(bmp)
         val track = Paint(Paint.ANTI_ALIAS_FLAG)
         track.isDither = true
-        track.color = context.getColor(R.color.bw_surface2)
+        track.color = context.getColor(
+            if (BudgetStore(context).isLightTheme(context)) R.color.bw_surface2_light else R.color.bw_surface2,
+        )
         val rr = h / 2f
         canvas.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), rr, rr, track)
         val fillW = w * (pct / 100f).coerceIn(0f, 1f)

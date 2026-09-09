@@ -38,7 +38,13 @@ class CategoryRemoteService : RemoteViewsService() {
             val row = rows.getOrNull(position) ?: return RemoteViews(context.packageName, R.layout.widget_cat_row)
             val views = RemoteViews(context.packageName, R.layout.widget_cat_row)
             val store = BudgetStore(context)
-            val on = context.getColor(if (store.isLightTheme(context)) R.color.bw_on_light else R.color.bw_on)
+            val light = store.isLightTheme(context)
+            views.setInt(
+                R.id.cat_row,
+                "setBackgroundResource",
+                if (light) R.drawable.widget_cat_card_light else R.drawable.widget_cat_card,
+            )
+            val on = context.getColor(if (light) R.color.bw_on_light else R.color.bw_on)
             views.setTextViewText(R.id.cat_name, row.name)
             views.setTextColor(R.id.cat_name, on)
             val left = row.envelope - row.spent
@@ -55,10 +61,10 @@ class CategoryRemoteService : RemoteViewsService() {
             if (hasBudget && monthlyIncome > 0) {
                 val share = row.budgeted / monthlyIncome * 100.0
                 views.setTextViewText(R.id.cat_pct, BudgetStore.formatPct(share))
-                views.setTextColor(R.id.cat_pct, context.getColor(R.color.bw_primary))
+                views.setTextColor(R.id.cat_pct, context.getColor(if (light) R.color.bw_primary_light else R.color.bw_primary))
             } else {
                 views.setTextViewText(R.id.cat_pct, "—")
-                views.setTextColor(R.id.cat_pct, context.getColor(R.color.bw_outline_soft))
+                views.setTextColor(R.id.cat_pct, context.getColor(if (light) R.color.bw_outline_light else R.color.bw_outline_soft))
             }
             views.setImageViewBitmap(R.id.cat_swatch, WidgetBitmaps.swatch(context, row.color))
             val fill = Intent()

@@ -200,6 +200,7 @@
             android:orientation="horizontal">
 
             <LinearLayout
+                android:id="@+id/widget_stat_budgeted_box"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
@@ -241,6 +242,7 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/widget_stat_spent_box"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
@@ -282,6 +284,7 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/widget_stat_left_box"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -367,6 +370,7 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/widget_wheel_oob_lbl"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="1dp"

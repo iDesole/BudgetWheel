@@ -63,13 +63,17 @@ object WheelRenderer {
         canvas.translate(pad.toFloat(), pad.toFloat())
 
         val wheel = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        drawWheel(Canvas(wheel), slices, size, scale, selectedId)
+        drawWheel(Canvas(wheel), slices, size, scale, selectedId, light)
 
-        val shadow = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        shadow.isFilterBitmap = true
-        shadow.isDither = true
-        shadow.setShadowLayer(24f * scale, 0f, 10f * scale, 0x47000000.toInt())
-        canvas.drawBitmap(wheel, 0f, 0f, shadow)
+        if (light) {
+            canvas.drawBitmap(wheel, 0f, 0f, null)
+        } else {
+            val shadow = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            shadow.isFilterBitmap = true
+            shadow.isDither = true
+            shadow.setShadowLayer(24f * scale, 0f, 10f * scale, 0x47000000.toInt())
+            canvas.drawBitmap(wheel, 0f, 0f, shadow)
+        }
         wheel.recycle()
 
         if (showCenter) drawCenter(canvas, size, scale, center, light)
@@ -82,6 +86,7 @@ object WheelRenderer {
         size: Int,
         scale: Float,
         selectedId: String?,
+        light: Boolean,
     ) {
         val cx = size / 2f
         val cy = size / 2f
@@ -93,7 +98,7 @@ object WheelRenderer {
             val ring = Paint(Paint.ANTI_ALIAS_FLAG)
             ring.style = Paint.Style.STROKE
             ring.strokeWidth = rings.mainOuter - rings.hole
-            ring.color = Color.parseColor("#49454F")
+            ring.color = Color.parseColor(if (light) "#D4CDB8" else "#49454F")
             canvas.drawCircle(cx, cy, (rings.hole + rings.mainOuter) / 2f, ring)
             return
         }
@@ -222,10 +227,15 @@ object WheelRenderer {
         val maxH = hole * 1.62f
         val on = if (light) "#1C1B16" else "#F4EFF7"
         val soft = if (light) "#5C5748" else "#CAC4D0"
+        if (light) {
+            val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+            fill.color = Color.parseColor("#F3EFE6")
+            canvas.drawCircle(cx, cy, hole * 0.98f, fill)
+        }
 
         val label = paint(Color.parseColor(soft), Typeface.create("sans-serif-medium", Typeface.NORMAL))
         val value = paint(
-            Color.parseColor(if (center.negative) "#FFB4AB" else on),
+            Color.parseColor(if (center.negative) (if (light) "#BA1A1A" else "#FFB4AB") else on),
             Typeface.create("sans-serif-medium", Typeface.BOLD),
         )
         val sub = paint(Color.parseColor(soft), Typeface.create("sans-serif", Typeface.NORMAL))
