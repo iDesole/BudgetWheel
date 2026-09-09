@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="bw_bg">#0D0C10</color>
-    <color name="bw_icon_bg">#132239</color>
+    <color name="bw_icon_bg">#000000</color>
     <color name="bw_surface">#1C1B21</color>
     <color name="bw_surface2">#26252C</color>
     <color name="bw_on">#F4EFF7</color>

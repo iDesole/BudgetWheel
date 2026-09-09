@@ -51,6 +51,7 @@ function sanitizeSource(raw: unknown, index: number): IncomeSource | null {
     monthlyGross: clampMoney(finiteNumber(o.monthlyGross)),
     monthlyTakeHome: clampMoney(finiteNumber(o.monthlyTakeHome)),
     estimatedTaxAnnual: clampMoney(finiteNumber(o.estimatedTaxAnnual)),
+    takeHomeOverridden: Boolean(o.takeHomeOverridden),
   };
 }
 

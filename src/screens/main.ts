@@ -52,10 +52,10 @@ import { openPlayStore, pinHomeWidget } from "../lib/android.ts";
 import { downloadHistoryWheels } from "../lib/history-export.ts";
 import { extraInFromTransactions, periodLabel, periodWord } from "../lib/history.ts";
 import { openCategoryBudget, openColorPicker, openIncomeSource } from "./onboarding.ts";
-import { backChevron, forwardChevron, logoSvg, trashCan } from "../ui/icons.ts";
+import { backChevron, forwardChevron, logoMark, trashCan } from "../ui/icons.ts";
 import { bindNav, graphIcon, navBar, wheelIcon } from "../ui/nav.ts";
 import { bindNumpad, numpadMarkup } from "../ui/numpad.ts";
-import { wheelCenterMarkup, wheelSvg } from "../ui/wheel.ts";
+import { wheelCenterMarkup, wheelSvg, type WheelSlice } from "../ui/wheel.ts";
 
 let purchasePad = "";
 let historyScale: HistoryScale = "month";
@@ -124,6 +124,68 @@ function budgetLeftStat(remaining: number): string {
       <span class="graph-stat-val ${over ? "is-neg" : ""}">${formatMoney(over ? -remaining : remaining)}</span>
       <span class="graph-stat-lbl">${over ? "over-Budget" : "budget-left"}</span>
     </div>`;
+}
+
+function wheelBlockMarkup(
+  slices: Array<WheelSlice & { remaining: number }>,
+  opts: {
+    selected: { id: string; name: string; remaining: number; spent: number; envelope: number } | null;
+    totals: { outOfBudget: number; remaining: number; envelope: number; spent: number };
+    periodIncome: number;
+    tour?: boolean;
+  },
+): string {
+  const selected = opts.selected;
+  const centerValue = selected ? selected.remaining : opts.periodIncome;
+  return `<div class="wheel-wrap">
+        <div class="wheel-stage"${opts.tour ? ` id="tour-wheel" data-tour="wheel"` : ""}>
+        ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
+        ${wheelCenterMarkup({
+          label: selected ? selected.name : "Income",
+          value: formatMoney(centerValue),
+          negative: centerValue < 0,
+          subPrimary: selected ? selectedSliceSub(selected) : `${formatMoney(opts.totals.spent)} spent`,
+          subSecondary: selected ? undefined : `of ${formatMoney(opts.totals.envelope)} budget`,
+        })}
+        </div>
+        ${wheelCornerTotalsMarkup(opts.totals)}
+        ${
+          slices.length
+            ? `<button type="button" class="wheel-cycle-btn is-left" data-cycle="1" aria-label="Previous category">${backChevron}</button>
+               <button type="button" class="wheel-cycle-btn is-right" data-cycle="-1" aria-label="Next category">${forwardChevron}</button>`
+            : ""
+        }
+      </div>`;
+}
+
+function bindWheelBlock(el: HTMLElement, slices: Array<{ id: string }>): void {
+  el.querySelectorAll<HTMLElement>("[data-slice]").forEach((path) => {
+    path.addEventListener("click", () => {
+      const id = path.dataset.slice ?? null;
+      setSelectedSlice(selectedSliceId === id ? null : id);
+    });
+  });
+  el.querySelectorAll<HTMLButtonElement>("[data-cycle]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const dir = Number(btn.dataset.cycle) === -1 ? -1 : 1;
+      const ids = slices.map((s) => s.id);
+      if (!ids.length) return;
+      const current = selectedSliceId ? ids.indexOf(selectedSliceId) : dir > 0 ? -1 : 0;
+      const next = ids[(current + dir + ids.length) % ids.length];
+      setSelectedSlice(next);
+    });
+  });
+}
+
+function bindSliceDetail(el: HTMLElement, open: () => void): void {
+  el.querySelector("[data-slice-detail]")?.addEventListener("click", open);
+  el.querySelector("[data-slice-detail]")?.addEventListener("keydown", (ev) => {
+    if (!(ev instanceof KeyboardEvent)) return;
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    open();
+  });
 }
 
 function budgetSpentOverMarkup(selected: { envelope: number; spent: number; remaining: number }): string {
@@ -288,8 +350,6 @@ export function renderHome(): HTMLElement {
   const slices = wheelCategories();
   const selected = slices.find((s) => s.id === selectedSliceId) ?? null;
   const totals = budgetSpendTotals(slices);
-  const totalEnv = totals.envelope;
-  const totalSpent = totals.spent;
   const monthlyIncome = state.income?.monthlyTakeHome ?? 0;
   const periodIncome = livePeriodIncome();
   const scale = state.wheelScale;
@@ -297,10 +357,8 @@ export function renderHome(): HTMLElement {
   const yearLabel = String(new Date().getFullYear());
   const over = isOverBudget() && !selected;
   const periodWord = scale === "year" ? "year" : scale === "quarter" ? "quarter" : "month";
-  const centerLabel = selected ? selected.name : "Income";
   const scaleLabel = scale === "year" ? "Yearly" : scale === "quarter" ? "Quarterly" : "Monthly";
   const titleLabel = scale === "year" ? yearLabel : scale === "quarter" ? q.label : monthLabel;
-  const centerValue = selected ? selected.remaining : periodIncome;
 
   const graphMode = state.homeChart === "bars";
   const totalBudgeted = totals.budgeted;
@@ -377,25 +435,7 @@ export function renderHome(): HTMLElement {
           ? budgetChartMarkup(slices, {
               selectedId: selectedSliceId,
             })
-          : `<div class="wheel-wrap">
-        <div class="wheel-stage" id="tour-wheel" data-tour="wheel">
-        ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
-        ${wheelCenterMarkup({
-          label: centerLabel,
-          value: formatMoney(centerValue),
-          negative: centerValue < 0,
-          subPrimary: selected ? selectedSliceSub(selected) : `${formatMoney(totalSpent)} spent`,
-          subSecondary: selected ? undefined : `of ${formatMoney(totalEnv)} budget`,
-        })}
-        </div>
-        ${wheelCornerTotalsMarkup(totals)}
-        ${
-          slices.length
-            ? `<button type="button" class="wheel-cycle-btn is-left" data-cycle="1" aria-label="Previous category">${backChevron}</button>
-               <button type="button" class="wheel-cycle-btn is-right" data-cycle="-1" aria-label="Next category">${forwardChevron}</button>`
-            : ""
-        }
-      </div>`
+          : wheelBlockMarkup(slices, { selected, totals, periodIncome, tour: true })
       }
       ${
         over
@@ -425,30 +465,8 @@ export function renderHome(): HTMLElement {
       ${navBar("home")}
     </section>`;
 
-  el.querySelectorAll<HTMLElement>("[data-slice]").forEach((path) => {
-    path.addEventListener("click", () => {
-      const id = path.dataset.slice ?? null;
-      setSelectedSlice(selectedSliceId === id ? null : id);
-    });
-  });
-  el.querySelectorAll<HTMLButtonElement>("[data-cycle]").forEach((btn) => {
-    btn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      const dir = Number(btn.dataset.cycle) === -1 ? -1 : 1;
-      const ids = slices.map((s) => s.id);
-      if (!ids.length) return;
-      const current = selectedSliceId ? ids.indexOf(selectedSliceId) : dir > 0 ? -1 : 0;
-      const next = ids[(current + dir + ids.length) % ids.length];
-      setSelectedSlice(next);
-    });
-  });
-  el.querySelector("[data-slice-detail]")?.addEventListener("click", () => {
-    if (selected) go({ id: "category-activity", categoryId: selected.id });
-  });
-  el.querySelector("[data-slice-detail]")?.addEventListener("keydown", (ev) => {
-    if (!(ev instanceof KeyboardEvent)) return;
-    if (ev.key !== "Enter" && ev.key !== " ") return;
-    ev.preventDefault();
+  bindWheelBlock(el, slices);
+  bindSliceDetail(el, () => {
     if (selected) go({ id: "category-activity", categoryId: selected.id });
   });
   el.querySelector("[data-color-for]")?.addEventListener("click", (ev) => {
@@ -834,7 +852,7 @@ export function renderPastQuarter(): HTMLElement {
                 .map((snap) => historyRow(snap, selecting, Boolean(historySelect?.ids.has(snap.id))))
                 .join("")
             : `<div class="empty-card">
-          ${logoSvg}
+          ${logoMark}
           <p>${emptyHint}</p>
         </div>`
         }
@@ -1019,13 +1037,9 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
   const slices = historyWheelSlices(snap);
   const selected = slices.find((s) => s.id === selectedSliceId) ?? null;
   const totals = budgetSpendTotals(slices);
-  const totalEnv = totals.envelope;
-  const totalSpent = totals.spent;
   const monthlyIncome = snap.monthlyIncome;
   const periodIncome = monthlyIncome * snap.periodMonths;
   const word = periodWord(snap.scale);
-  const centerLabel = selected ? selected.name : "Income";
-  const centerValue = selected ? selected.remaining : periodIncome;
   const graphMode = state.homeChart === "bars";
   const totalBudgeted = totals.budgeted;
   const shareLabel = selected ? incomeShareLabel(selected.budgeted, monthlyIncome, selected.id) : "";
@@ -1092,23 +1106,7 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
       ${
         graphMode
           ? budgetChartMarkup(slices, { selectedId: selectedSliceId })
-          : `<div class="wheel-wrap">
-        ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
-        ${wheelCenterMarkup({
-          label: centerLabel,
-          value: formatMoney(centerValue),
-          negative: centerValue < 0,
-          subPrimary: selected ? selectedSliceSub(selected) : `${formatMoney(totalSpent)} spent`,
-          subSecondary: selected ? undefined : `of ${formatMoney(totalEnv)} budget`,
-        })}
-        ${wheelCornerTotalsMarkup(totals)}
-        ${
-          slices.length
-            ? `<button type="button" class="wheel-cycle-btn is-left" data-cycle="1" aria-label="Previous category">${backChevron}</button>
-               <button type="button" class="wheel-cycle-btn is-right" data-cycle="-1" aria-label="Next category">${forwardChevron}</button>`
-            : ""
-        }
-      </div>`
+          : wheelBlockMarkup(slices, { selected, totals, periodIncome })
       }
       ${wheelDetail}
       ${
@@ -1123,30 +1121,8 @@ export function renderHistoryPeriod(periodId: string): HTMLElement {
 
   el.querySelector("[data-back]")?.addEventListener("click", () => back());
   bindChartToggle(el);
-  el.querySelectorAll<HTMLElement>("[data-slice]").forEach((path) => {
-    path.addEventListener("click", () => {
-      const id = path.dataset.slice ?? null;
-      setSelectedSlice(selectedSliceId === id ? null : id);
-    });
-  });
-  el.querySelectorAll<HTMLButtonElement>("[data-cycle]").forEach((btn) => {
-    btn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      const dir = Number(btn.dataset.cycle) === -1 ? -1 : 1;
-      const ids = slices.map((s) => s.id);
-      if (!ids.length) return;
-      const current = selectedSliceId ? ids.indexOf(selectedSliceId) : dir > 0 ? -1 : 0;
-      const next = ids[(current + dir + ids.length) % ids.length];
-      setSelectedSlice(next);
-    });
-  });
-  el.querySelector("[data-slice-detail]")?.addEventListener("click", () => {
-    if (selected) go({ id: "category-activity", categoryId: selected.id, periodId: snap.id });
-  });
-  el.querySelector("[data-slice-detail]")?.addEventListener("keydown", (ev) => {
-    if (!(ev instanceof KeyboardEvent)) return;
-    if (ev.key !== "Enter" && ev.key !== " ") return;
-    ev.preventDefault();
+  bindWheelBlock(el, slices);
+  bindSliceDetail(el, () => {
     if (selected) go({ id: "category-activity", categoryId: selected.id, periodId: snap.id });
   });
   el.querySelector("[data-color-for]")?.addEventListener("click", (ev) => {
@@ -1382,7 +1358,7 @@ export function renderSettings(): HTMLElement {
         <h2 class="headline">How the wheel works</h2>
         <details class="faq">
           <summary>Add a Slice</summary>
-          <p>Open Categories, then Other. Or tap a slice and tidy the name or color.</p>
+          <p>Open Categories, then Other, to add a custom category. Tap a slice to change its color.</p>
         </details>
         <details class="faq">
           <summary>Switch Views</summary>

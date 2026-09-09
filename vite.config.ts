@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => ({
       registerType: "autoUpdate",
       injectRegister: "auto",
       includeAssets: [
-        "favicon.svg",
+        "favicon.png",
         "icons/icon-192.png",
         "icons/icon-512.png",
         "widget-manifest.webmanifest",

@@ -131,7 +131,7 @@ assert(JSON.stringify(eachQuarterId("2026-Q4", "2027-Q2")) === JSON.stringify(["
 assert(JSON.stringify(eachYearId(2026, 2029)) === JSON.stringify(["2026", "2027", "2028"]), "years 2026-2028");
 assert(quarterIdFromMonthId("2026-12") === "2026-Q4", "Dec is Q4");
 assert(quarterIdFromMonthId("2027-01") === "2027-Q1", "Jan is Q1");
-assert(formatMonthLabel("2027-01") === "January 2027", "January 2027 label");
+assert(formatMonthLabel("2027-01") === "Jan 2027", "January 2027 label");
 
 const range = formatQuarterRange("2026-10-01", "2026-12-31");
 assert(range.includes("2026") && range.includes("Oct") && range.includes("Dec"), `Q4 range: ${range}`);

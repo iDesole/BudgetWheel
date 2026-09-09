@@ -37,16 +37,20 @@ class CategoryRemoteService : RemoteViewsService() {
         override fun getViewAt(position: Int): RemoteViews {
             val row = rows.getOrNull(position) ?: return RemoteViews(context.packageName, R.layout.widget_cat_row)
             val views = RemoteViews(context.packageName, R.layout.widget_cat_row)
+            val store = BudgetStore(context)
+            val on = context.getColor(if (store.isLightTheme(context)) R.color.bw_on_light else R.color.bw_on)
             views.setTextViewText(R.id.cat_name, row.name)
+            views.setTextColor(R.id.cat_name, on)
             val left = row.envelope - row.spent
             val hasBudget = row.budgeted > 0
             views.setTextViewText(
                 R.id.cat_left,
                 if (hasBudget) "${BudgetStore.money(left)} left" else "No budget set",
             )
+            val soft = context.getColor(if (store.isLightTheme(context)) R.color.bw_soft_light else R.color.bw_soft)
             views.setTextColor(
                 R.id.cat_left,
-                context.getColor(if (hasBudget && left < amount) R.color.bw_warn else R.color.bw_soft),
+                if (hasBudget && left < amount) context.getColor(R.color.bw_warn) else soft,
             )
             if (hasBudget && monthlyIncome > 0) {
                 val share = row.budgeted / monthlyIncome * 100.0

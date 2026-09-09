@@ -6,7 +6,7 @@ import "./lib/compat.ts";
 import { startApp } from "./app.ts";
 import { captureInstallPrompt, isWidgetPath } from "./lib/widget.ts";
 import { handleWidgetBack, resetWidget } from "./screens/widget.ts";
-import { handlePopState, hydrate, refreshOnForeground, refreshUi } from "./store.ts";
+import { consumeBack, handlePopState, hydrate, refreshOnForeground, refreshUi } from "./store.ts";
 import "./style.css";
 
 if (isWidgetPath()) {
@@ -104,4 +104,14 @@ void hydrate().then(() => {
 
 (window as unknown as { BudgetWheelRefresh?: () => void }).BudgetWheelRefresh = () => {
   void refreshOnForeground();
+};
+
+(window as unknown as { BudgetWheelBack?: () => boolean }).BudgetWheelBack = () => {
+  if (handleWidgetBack()) return true;
+  if (document.body.classList.contains("is-widget")) {
+    resetWidget();
+    refreshUi();
+    return true;
+  }
+  return consumeBack();
 };

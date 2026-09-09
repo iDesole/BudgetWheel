@@ -20,6 +20,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewAssetLoader
 import com.budgetwheel.app.widget.WheelWidgetProvider
 
@@ -56,6 +58,15 @@ class MainActivity : AppCompatActivity() {
             .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
 
+        web.setBackgroundColor(Color.parseColor("#0D0C10"))
+        web.overScrollMode = View.OVER_SCROLL_NEVER
+        ViewCompat.setOnApplyWindowInsetsListener(web) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = false
@@ -95,7 +106,12 @@ class MainActivity : AppCompatActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    if (web.canGoBack()) web.goBack() else finish()
+                    web.evaluateJavascript(
+                        "(function(){try{return !!(window.BudgetWheelBack&&window.BudgetWheelBack());}catch(e){return false;}})()",
+                    ) { result ->
+                        if (result == "true") return@evaluateJavascript
+                        if (web.canGoBack()) web.goBack() else finish()
+                    }
                 }
             },
         )

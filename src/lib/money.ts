@@ -75,6 +75,8 @@ export function padDisplay(raw: string, unit: "money" | "hours" | "percent" = "m
 }
 
 export function uid(prefix = "id"): string {
+  const n = globalThis.crypto?.randomUUID?.().replaceAll("-", "").slice(0, 16);
+  if (n) return `${prefix}_${n}`;
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
 

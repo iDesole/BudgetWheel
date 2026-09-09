@@ -288,6 +288,14 @@ class BudgetStore(context: Context) {
 
     fun themePref(): String = bundle()?.state?.optString("theme", "dark") ?: "dark"
 
+    fun isLightTheme(context: Context): Boolean {
+        val pref = themePref()
+        if (pref == "light") return true
+        if (pref == "dark") return false
+        val night = context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        return night == android.content.res.Configuration.UI_MODE_NIGHT_NO
+    }
+
     fun outOfBudgetSpend(): Double =
         slices().filter { it.id != EXTRA_FUNDS_ID && it.envelope <= 0.009 }.sumOf { it.spent }
 

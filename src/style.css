@@ -316,6 +316,7 @@ input {
   border-radius: var(--radius);
   padding: 18px 18px;
   min-height: 72px;
+  transition: transform 140ms var(--ease);
 }
 
 .choice-card:active,
@@ -356,6 +357,7 @@ input {
   border-radius: 999px;
   font-weight: 700;
   letter-spacing: 0.01em;
+  transition: transform 140ms var(--ease), opacity 140ms var(--ease);
 }
 
 .btn-primary {
@@ -526,6 +528,9 @@ input {
 .logo-mark {
   width: 88px;
   height: 88px;
+  border-radius: 24%;
+  object-fit: cover;
+  display: block;
 }
 
 .search-wrap,
@@ -1489,7 +1494,27 @@ input {
 }
 
 .wheel-slice {
-  transition: opacity 160ms var(--ease);
+  transition: opacity 160ms var(--ease), filter 160ms var(--ease);
+}
+
+.wheel-slice.is-selected {
+  filter: brightness(1.08);
+}
+
+.screen-enter .wheel-svg {
+  transform-origin: center;
+  animation: wheelSettle 520ms var(--ease);
+}
+
+@keyframes wheelSettle {
+  from {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .wheel-cycle-btn {
@@ -2396,6 +2421,7 @@ body.is-tour:not(.tour-step-3) .home-head-toggle {
 
 @media (prefers-reduced-motion: reduce) {
   .screen-enter,
+  .screen-enter .wheel-svg,
   .toast,
   .widget-stage,
   .screen-home.is-graph .budget-chart,

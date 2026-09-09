@@ -41,7 +41,11 @@ class GraphRemoteService : RemoteViewsService() {
                 "setBackgroundResource",
                 if (row.id == selectedId) R.drawable.widget_bar_card_on else R.drawable.widget_bar_card,
             )
+            val store = BudgetStore(context)
+            val on = context.getColor(if (store.isLightTheme(context)) R.color.bw_on_light else R.color.bw_on)
+            val soft = context.getColor(if (store.isLightTheme(context)) R.color.bw_soft_light else R.color.bw_soft)
             views.setTextViewText(R.id.bar_name, row.name)
+            views.setTextColor(R.id.bar_name, on)
             val extra = row.id == BudgetStore.EXTRA_FUNDS_ID
             val envLabel = if (row.envelope > 0) BudgetStore.money(row.envelope) else "—"
             views.setTextViewText(
@@ -49,6 +53,8 @@ class GraphRemoteService : RemoteViewsService() {
                 if (extra) "${BudgetStore.money(row.spent)} lost of $envLabel"
                 else "${BudgetStore.money(row.spent)} of $envLabel",
             )
+            views.setTextColor(R.id.bar_amt, soft)
+            views.setTextColor(R.id.bar_pct, soft)
             val over = row.envelope > 0 && row.spent > row.envelope + 0.009
             val pct = if (row.envelope > 0) {
                 min(100.0, row.spent / row.envelope * 100.0)
@@ -68,7 +74,7 @@ class GraphRemoteService : RemoteViewsService() {
             )
             views.setTextColor(
                 R.id.bar_left,
-                context.getColor(if (left < 0) R.color.bw_warn else R.color.bw_soft),
+                if (left < 0) context.getColor(R.color.bw_warn) else soft,
             )
             val fill = if (over) context.getColor(R.color.bw_error) else WidgetBitmaps.color(row.color)
             views.setImageViewBitmap(R.id.bar_track, WidgetBitmaps.bar(context, fill, pct.toFloat()))

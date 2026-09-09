@@ -1,13 +1,4 @@
-export const logoSvg = `
-<svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true">
-  <circle cx="32" cy="32" r="30" fill="#1A191F"/>
-  <path d="M32 8 A24 24 0 0 1 52.78 20 L43.2 25.6 A12 12 0 0 0 32 20 Z" fill="#F0C94D"/>
-  <path d="M52.78 20 A24 24 0 0 1 52.78 44 L43.2 38.4 A12 12 0 0 0 43.2 25.6 Z" fill="#7EB8D4"/>
-  <path d="M52.78 44 A24 24 0 0 1 32 56 L32 44 A12 12 0 0 0 43.2 38.4 Z" fill="#86C88A"/>
-  <path d="M32 56 A24 24 0 0 1 11.22 44 L20.8 38.4 A12 12 0 0 0 32 44 Z" fill="#F0A06A"/>
-  <path d="M11.22 44 A24 24 0 0 1 11.22 20 L20.8 25.6 A12 12 0 0 0 20.8 38.4 Z" fill="#B794F4"/>
-  <path d="M11.22 20 A24 24 0 0 1 32 8 L32 20 A12 12 0 0 0 20.8 25.6 Z" fill="#E09080"/>
-</svg>`;
+export const logoMark = `<img class="logo-mark" src="/icons/icon-192.png" width="88" height="88" alt="" />`;
 
 export const backChevron = `
 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

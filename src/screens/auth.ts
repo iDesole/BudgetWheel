@@ -1,4 +1,4 @@
-import { logoSvg } from "../ui/icons.ts";
+import { logoMark } from "../ui/icons.ts";
 import { startOnThisDevice } from "../store.ts";
 
 export function renderWelcomeAuth(): HTMLElement {
@@ -6,7 +6,7 @@ export function renderWelcomeAuth(): HTMLElement {
   el.innerHTML = `
     <section class="screen screen-welcome">
       <div class="welcome-hero">
-        ${logoSvg}
+        ${logoMark}
         <h1 class="brand">Budget Wheel</h1>
         <p class="lede">See where every dollar goes.</p>
       </div>

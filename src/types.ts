@@ -15,6 +15,8 @@ export interface IncomeSource {
   monthlyGross: number;
   monthlyTakeHome: number;
   estimatedTaxAnnual: number;
+  /** True when the user typed take-home instead of using the tax estimate. */
+  takeHomeOverridden?: boolean;
 }
 
 export interface Income {

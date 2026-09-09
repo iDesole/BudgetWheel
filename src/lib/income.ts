@@ -193,8 +193,9 @@ export function combineIncome(stateCode: string, sources: IncomeSource[]): Incom
   const tax = estimateTaxes(w2Gross, stateCode);
   const sideHome = side.reduce((sum, s) => sum + s.monthlyTakeHome, 0);
   const sideGross = side.reduce((sum, s) => sum + s.monthlyGross, 0);
+  const keepTakeHome = w2.length <= 1 || w2.some((s) => s.takeHomeOverridden);
   const adjusted = sources.map((s) => {
-    if (s.kind === "side" || s.type === "side" || w2Gross <= 0) return s;
+    if (s.kind === "side" || s.type === "side" || w2Gross <= 0 || keepTakeHome) return s;
     const share = s.monthlyGross / w2Gross;
     return {
       ...s,
@@ -202,6 +203,9 @@ export function combineIncome(stateCode: string, sources: IncomeSource[]): Incom
       estimatedTaxAnnual: clampMoney(tax.annualTax * share),
     };
   });
+  const w2Home = adjusted
+    .filter((s) => s.kind !== "side" && s.type !== "side")
+    .reduce((sum, s) => sum + s.monthlyTakeHome, 0);
   const head = adjusted.find((s) => s.kind === "primary") ?? adjusted[0];
   return {
     type: head?.type === "side" ? "salary" : (head?.type ?? "salary"),
@@ -211,7 +215,7 @@ export function combineIncome(stateCode: string, sources: IncomeSource[]): Incom
     hoursPerWeek: head?.hoursPerWeek,
     state: stateCode,
     monthlyGross: clampMoney(w2Gross + sideGross),
-    monthlyTakeHome: clampMoney(tax.monthlyTakeHome + sideHome),
+    monthlyTakeHome: clampMoney(w2Home + sideHome),
     estimatedTaxAnnual: tax.annualTax,
     sources: adjusted,
   };

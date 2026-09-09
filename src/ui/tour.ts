@@ -29,7 +29,7 @@ function stepCopy(step: number, empty: boolean): { title: string; body: string; 
   if (step === 2) {
     return {
       title: "Tap a slice",
-      body: "Open any slice to see what’s inside, add a purchase, or tidy the category.",
+      body: "Open any slice to see what’s inside, add a purchase, or change its color.",
       cta: "Next",
     };
   }

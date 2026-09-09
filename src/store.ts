@@ -28,12 +28,13 @@ import {
   EXTRA_FUNDS_ID,
   isFundsIn,
   isOutOfBudgetSpend,
+  NOT_IN_BUDGET_ID,
   nextCustomColor,
   retireDebtPayments,
   syncExtraFunds,
   withExtraFundsPool,
 } from "./lib/categories.ts";
-import { combineIncome, finalizeIncome, listedSources, normalizeSourceKinds, peelAddedFunds } from "./lib/income.ts";
+import { combineIncome, estimateTaxes, finalizeIncome, listedSources, normalizeSourceKinds, peelAddedFunds } from "./lib/income.ts";
 import { clampMoney, uid } from "./lib/money.ts";
 import {
   advancePeriodCursor,
@@ -254,6 +255,32 @@ export function back(): void {
   }
   applyBack();
   writeHistory("replace");
+}
+
+export function consumeBack(): boolean {
+  if (tourStep != null) {
+    void skipTour();
+    return true;
+  }
+  if (reviewPromptVisible) {
+    void resolveReview("later");
+    return true;
+  }
+  const sheet = document.querySelector(".over-sheet");
+  const colorPop = document.querySelector(".color-pop");
+  const periodDrop = document.querySelector(".period-drop.is-open");
+  if (sheet || colorPop || periodDrop) {
+    sheet?.remove();
+    colorPop?.remove();
+    periodDrop?.classList.remove("is-open");
+    return true;
+  }
+  if (canGoBack()) {
+    applyBack();
+    writeHistory("replace");
+    return true;
+  }
+  return false;
 }
 
 export function handlePopState(): void {
@@ -841,6 +868,7 @@ export async function startOnThisDevice(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function sourceFromIncome(income: Income, kind: IncomeKind): IncomeSource {
+  const estimated = income.state ? estimateTaxes(income.monthlyGross, income.state).monthlyTakeHome : income.monthlyTakeHome;
   return {
     id: uid("inc"),
     kind,
@@ -852,6 +880,7 @@ function sourceFromIncome(income: Income, kind: IncomeKind): IncomeSource {
     monthlyGross: income.monthlyGross,
     monthlyTakeHome: income.monthlyTakeHome,
     estimatedTaxAnnual: income.estimatedTaxAnnual,
+    takeHomeOverridden: Math.abs(income.monthlyTakeHome - estimated) > 0.009,
   };
 }
 
@@ -934,9 +963,11 @@ export async function removeCategory(id: string): Promise<void> {
   const cat = state.categories.find((c) => c.id === id);
   if (!cat?.isCustom) return;
   state.categories = state.categories.filter((c) => c.id !== id);
-  state.transactions = state.transactions.filter((t) => t.categoryId !== id);
+  state.transactions = state.transactions.map((t) =>
+    t.categoryId === id ? { ...t, categoryId: NOT_IN_BUDGET_ID } : t,
+  );
   if (selectedSliceId === id) selectedSliceId = null;
-  await persist();
+  await persist({ skipAbsorb: true });
   emit();
 }
 

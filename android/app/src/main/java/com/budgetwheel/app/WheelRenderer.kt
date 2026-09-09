@@ -53,6 +53,7 @@ object WheelRenderer {
         center: Center,
         selectedId: String? = null,
         showCenter: Boolean = true,
+        light: Boolean = false,
     ): Bitmap {
         val size = max(200, sizePx)
         val scale = size / VIEW
@@ -71,7 +72,7 @@ object WheelRenderer {
         canvas.drawBitmap(wheel, 0f, 0f, shadow)
         wheel.recycle()
 
-        if (showCenter) drawCenter(canvas, size, scale, center)
+        if (showCenter) drawCenter(canvas, size, scale, center, light)
         return bmp
     }
 
@@ -213,19 +214,21 @@ object WheelRenderer {
         return path
     }
 
-    private fun drawCenter(canvas: Canvas, size: Int, scale: Float, center: Center) {
+    private fun drawCenter(canvas: Canvas, size: Int, scale: Float, center: Center, light: Boolean) {
         val cx = size / 2f
         val cy = size / 2f
         val hole = HOLE * scale
         val maxW = hole * 1.62f
         val maxH = hole * 1.62f
+        val on = if (light) "#1C1B16" else "#F4EFF7"
+        val soft = if (light) "#5C5748" else "#CAC4D0"
 
-        val label = paint(Color.parseColor("#CAC4D0"), Typeface.create("sans-serif-medium", Typeface.NORMAL))
+        val label = paint(Color.parseColor(soft), Typeface.create("sans-serif-medium", Typeface.NORMAL))
         val value = paint(
-            Color.parseColor(if (center.negative) "#FFB4AB" else "#F4EFF7"),
+            Color.parseColor(if (center.negative) "#FFB4AB" else on),
             Typeface.create("sans-serif-medium", Typeface.BOLD),
         )
-        val sub = paint(Color.parseColor("#CAC4D0"), Typeface.create("sans-serif", Typeface.NORMAL))
+        val sub = paint(Color.parseColor(soft), Typeface.create("sans-serif", Typeface.NORMAL))
 
         val labelSrc = center.label.uppercase()
         val valueSrc = center.value

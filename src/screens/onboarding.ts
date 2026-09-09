@@ -44,6 +44,7 @@ let pad = "";
 let customName = "";
 let amountUnit: "money" | "percent" = "money";
 let hideMode = false;
+let incomeSaving = false;
 
 function stepDots(current: number, total = 5): string {
   return `<div class="dots" aria-hidden="true">${Array.from({ length: total }, (_, i) => `<span class="dot${i === current ? " is-on" : ""}"></span>`).join("")}</div>`;
@@ -403,6 +404,7 @@ export function renderState(): HTMLElement {
 }
 
 export function renderIncomeConfirm(): HTMLElement {
+  incomeSaving = false;
   const gross = monthlyGrossFromDraft(draft);
   const tax = draft.state ? estimateTaxes(gross, draft.state) : null;
   const takeHome = draft.monthlyTakeHomeOverride ?? tax?.monthlyTakeHome ?? 0;
@@ -440,9 +442,22 @@ export function renderIncomeConfirm(): HTMLElement {
     go({ id: "income-adjust" });
   });
   el.querySelector("[data-confirm]")?.addEventListener("click", async () => {
-    const income = await saveIncomeFromDraft();
-    if (!income) return;
-    afterIncomeSaved();
+    if (incomeSaving) return;
+    incomeSaving = true;
+    const btn = el.querySelector<HTMLButtonElement>("[data-confirm]");
+    if (btn) btn.disabled = true;
+    try {
+      const income = await saveIncomeFromDraft();
+      if (!income) {
+        incomeSaving = false;
+        if (btn) btn.disabled = takeHome <= 0;
+        return;
+      }
+      afterIncomeSaved();
+    } catch {
+      incomeSaving = false;
+      if (btn) btn.disabled = false;
+    }
   });
   return el;
 }
@@ -519,6 +534,7 @@ export function renderExtraIncome(): HTMLElement {
 }
 
 export function renderSideAmount(): HTMLElement {
+  incomeSaving = false;
   const extraLabel = draftSlotLabel();
   const editing = Boolean(draft.sourceId);
   const el = document.createElement("div");
@@ -529,9 +545,16 @@ export function renderSideAmount(): HTMLElement {
     submitLabel: editing ? "Save" : "Add it",
   });
   bindAmount(el, async (amount) => {
+    if (incomeSaving) return;
+    incomeSaving = true;
     updateDraft({ monthlyTakeHomeOverride: amount, salaryAmount: amount, type: "side", slot: "side" });
-    const saved = await saveIncomeFromDraft();
-    if (saved) afterIncomeSaved();
+    try {
+      const saved = await saveIncomeFromDraft();
+      if (saved) afterIncomeSaved();
+      else incomeSaving = false;
+    } catch {
+      incomeSaving = false;
+    }
   });
   return el;
 }
@@ -700,7 +723,7 @@ export function renderBudgetAmount(screen: Extract<Screen, { id: "budget-amount"
     sheet.innerHTML = `
       <div class="over-card">
         <h2 class="headline">Delete ${escapeHtml(name)}?</h2>
-        <p class="sub">This custom category will be removed. Purchases logged to it this quarter will be removed too.</p>
+        <p class="sub">This custom category will be removed. Its purchases stay under Not in the Budget.</p>
         <button type="button" class="btn btn-primary btn-xl" data-del-yes>Yes, delete it</button>
         <button type="button" class="btn btn-ghost" data-del-no>Cancel</button>
       </div>`;
@@ -789,7 +812,8 @@ function leaveBudgetAmount(from?: "onboarding" | "settings" | "home"): void {
     resetNav({ id: "home" });
     return;
   }
-  go({ id: "catalog", from }, { replace: true });
+  if (canGoBack()) back();
+  else resetNav({ id: "catalog", from });
 }
 
 /** Used when the pending custom category is being created via the amount screen. */

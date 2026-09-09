@@ -177,6 +177,7 @@ function wheelMarkup(): string {
         </header>
         <div class="widget-stage" data-phase="wheel">
           <div class="wheel-wrap">
+            <div class="wheel-stage">
             ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
             ${wheelCenterMarkup({
               label: centerLabel,
@@ -189,6 +190,7 @@ function wheelMarkup(): string {
                 : `${formatMoney(totals.spent)} spent`,
               subSecondary: selected ? undefined : `of ${formatMoney(totals.envelope)} budget`,
             })}
+            </div>
             <div class="wheel-corner-totals is-oob">
               <div class="graph-stat">
                 <span class="graph-stat-val${totals.outOfBudget > 0.009 ? " is-neg" : ""}">${formatMoney(totals.outOfBudget)}</span>
