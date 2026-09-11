@@ -5,7 +5,8 @@
  * persist() calls pushBudgetToAndroid with baseUpdatedAt = the stamp before this
  * write, so native mergeBudgetJson can keep purchases the widget logged while
  * the WebView was saving. pullBudgetFromAndroid is the other direction.
- * Extra JS methods: saveDownload, openPlayStore, setChrome, pinWidget.
+ * Extra JS methods: saveDownload, openPlayStore, setChrome, pinWidget,
+ * widgetOwned, widgetPrice, buyWidget.
  */
 import { getCachedUser, getToken } from "../auth.ts";
 import { sanitizeState } from "./sanitize.ts";
@@ -20,12 +21,17 @@ interface AndroidBridge {
   openPlayStore?(): void;
   setChrome?(theme: string): void;
   pinWidget?(): string;
+  widgetOwned?(): string;
+  widgetPrice?(): string;
+  buyWidget?(): string;
 }
 
 function bridge(): AndroidBridge | null {
   const w = window as unknown as { BudgetWheelAndroid?: AndroidBridge };
   return w.BudgetWheelAndroid ?? null;
 }
+
+let ownedCache: boolean | null = null;
 
 export function isAndroidApp(): boolean {
   return bridge() !== null;
@@ -69,11 +75,49 @@ export function openPlayStore(): void {
   }
 }
 
-export async function pinHomeWidget(): Promise<"pinned" | "manual"> {
+export function widgetUnlockState(): "free" | "owned" | "locked" {
+  if (!isAndroidApp()) return "free";
+  if (ownedCache === true) return "owned";
+  try {
+    const native = bridge()?.widgetOwned?.() === "1";
+    ownedCache = native;
+    return native ? "owned" : "locked";
+  } catch {
+    return ownedCache === true ? "owned" : "locked";
+  }
+}
+
+export function watchWidgetOwned(onChange: () => void): void {
+  (window as unknown as { BudgetWheelWidgetOwned?: (owned: boolean) => void }).BudgetWheelWidgetOwned = (
+    owned: boolean,
+  ) => {
+    ownedCache = !!owned;
+    onChange();
+  };
+}
+
+export function widgetPriceLabel(): string {
+  try {
+    return bridge()?.widgetPrice?.() || "$1.99";
+  } catch {
+    return "$1.99";
+  }
+}
+
+export function buyHomeWidget(): void {
+  try {
+    bridge()?.buyWidget?.();
+  } catch {
+    /* Play Billing not ready */
+  }
+}
+
+export async function pinHomeWidget(): Promise<"pinned" | "manual" | "locked"> {
   const native = bridge();
   if (native?.pinWidget) {
     try {
       const result = native.pinWidget();
+      if (result === "locked") return "locked";
       if (result === "ok") return "pinned";
     } catch {
       /* older APK without pinWidget */

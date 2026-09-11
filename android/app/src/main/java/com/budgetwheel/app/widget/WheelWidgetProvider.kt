@@ -15,6 +15,7 @@ import com.budgetwheel.app.BudgetStore
 import com.budgetwheel.app.MainActivity
 import com.budgetwheel.app.R
 import com.budgetwheel.app.WheelRenderer
+import com.budgetwheel.app.WidgetBilling
 import java.util.Locale
 import kotlin.math.max
 
@@ -156,6 +157,10 @@ class WheelWidgetProvider : AppWidgetProvider() {
 
         fun render(context: Context, manager: AppWidgetManager, id: Int) {
             val store = BudgetStore(context)
+            if (!store.widgetUnlocked()) {
+                manager.updateAppWidget(id, lockedViews(context, store, id))
+                return
+            }
             val size = widgetSize(manager, id)
             val views = if (size != "full") {
                 compactViews(context, store, manager, id, wide = size == "wide")
@@ -183,6 +188,17 @@ class WheelWidgetProvider : AppWidgetProvider() {
                 minH < 160 -> "wide"
                 else -> "full"
             }
+        }
+
+        private fun lockedViews(context: Context, store: BudgetStore, id: Int): RemoteViews {
+            val views = RemoteViews(context.packageName, R.layout.widget_locked)
+            applyChrome(context, store, views)
+            views.setTextColor(R.id.widget_unlock_title, onInk(context, store))
+            views.setTextColor(R.id.widget_unlock_price, primaryInk(context, store))
+            views.setTextColor(R.id.widget_unlock_hint, softInk(context, store))
+            views.setOnClickPendingIntent(R.id.widget_root, openUnlock(context, id))
+            views.setOnClickPendingIntent(R.id.widget_open_app, openUnlock(context, id))
+            return views
         }
 
         private fun widgetLight(context: Context, store: BudgetStore): Boolean = store.isLightTheme(context)
@@ -608,6 +624,13 @@ class WheelWidgetProvider : AppWidgetProvider() {
             val intent = Intent(context, MainActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             return PendingIntent.getActivity(context, id, intent, flags())
+        }
+
+        private fun openUnlock(context: Context, id: Int): PendingIntent {
+            val intent = Intent(context, MainActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            intent.putExtra(WidgetBilling.EXTRA_UNLOCK, true)
+            return PendingIntent.getActivity(context, id + 9000, intent, flags())
         }
 
         private fun wheelSizePx(context: Context, manager: AppWidgetManager, id: Int): Int {

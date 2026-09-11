@@ -6,7 +6,7 @@
   "scope": "/",
   "id": "/widget",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#0D0C10",
   "theme_color": "#0D0C10",
   "icons": [

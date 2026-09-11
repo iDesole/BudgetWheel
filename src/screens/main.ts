@@ -48,7 +48,7 @@ import {
 } from "../store.ts";
 import type { HistoryScale, WheelSnapshot } from "../types.ts";
 import { EXTRA_FUNDS_ID, NOT_IN_BUDGET_ID, budgetSpendTotals, extraFundsCardStats } from "../lib/categories.ts";
-import { openPlayStore, pinHomeWidget } from "../lib/android.ts";
+import { buyHomeWidget, openPlayStore, pinHomeWidget, widgetPriceLabel, widgetUnlockState } from "../lib/android.ts";
 import { downloadHistoryWheels } from "../lib/history-export.ts";
 import { extraInFromTransactions, periodLabel, periodWord } from "../lib/history.ts";
 import { openCategoryBudget, openColorPicker, openIncomeSource } from "./onboarding.ts";
@@ -1209,8 +1209,12 @@ export function renderSettings(): HTMLElement {
       </button>
       <button type="button" class="settings-row" id="tour-widget" data-widget>
         <span>
-          <strong>Add Widget</strong>
-          <span class="muted">Home-screen wheel. Log purchases from there.</span>
+          <strong>${widgetUnlockState() === "locked" ? "Home Widget" : "Add Widget"}</strong>
+          <span class="muted">${
+            widgetUnlockState() === "locked"
+              ? `${escapeHtml(widgetPriceLabel())} one-time. Wheel and purchases on the home screen.`
+              : "Home-screen wheel. Log purchases from there."
+          }</span>
         </span>
         <span class="chevron">›</span>
       </button>
@@ -1323,8 +1327,34 @@ export function renderSettings(): HTMLElement {
     });
   });
   el.querySelector("[data-widget]")?.addEventListener("click", async () => {
+    if (widgetUnlockState() === "locked") {
+      el.querySelector(".over-sheet")?.remove();
+      const sheet = document.createElement("div");
+      sheet.className = "over-sheet";
+      const price = escapeHtml(widgetPriceLabel());
+      sheet.innerHTML = `
+        <div class="over-card">
+          <p class="brand-mini">Home Widget</p>
+          <h2 class="headline">Wheel on your home screen</h2>
+          <p class="sub">See what’s left this month and log a purchase without opening the app.</p>
+          <p class="sub">${price} one-time. Yours on this Google account after you buy.</p>
+          <button type="button" class="btn btn-primary btn-xl" data-widget-buy>Unlock for ${price}</button>
+          <button type="button" class="btn btn-ghost" data-widget-ok>Not now</button>
+        </div>`;
+      el.querySelector(".screen")?.append(sheet);
+      sheet.querySelector("[data-widget-buy]")?.addEventListener("click", () => {
+        buyHomeWidget();
+        sheet.remove();
+      });
+      sheet.querySelector("[data-widget-ok]")?.addEventListener("click", () => sheet.remove());
+      sheet.addEventListener("click", (ev) => {
+        if (ev.target === sheet) sheet.remove();
+      });
+      return;
+    }
     const result = await pinHomeWidget();
     if (result === "pinned") return;
+    if (result === "locked") return;
     el.querySelector(".over-sheet")?.remove();
     const sheet = document.createElement("div");
     sheet.className = "over-sheet";
@@ -1370,7 +1400,7 @@ export function renderSettings(): HTMLElement {
         </details>
         <details class="faq">
           <summary>Add Widget</summary>
-          <p>Settings → Add Widget. That pins Budget Wheel to your home screen. You can also log purchases from the widget.</p>
+          <p>Settings → Home Widget. The home-screen widget is a $1.99 one-time unlock. After that, pin it and log purchases from there.</p>
         </details>
         <details class="faq">
           <summary>Spending History</summary>

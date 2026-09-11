@@ -31,4 +31,7 @@
     <string name="widget_this_period">This %1$s</string>
     <string name="widget_all_categories">All categories</string>
     <string name="widget_left_month">left this month</string>
+    <string name="widget_unlock_title">Home widget</string>
+    <string name="widget_unlock_price">$1.99 one-time</string>
+    <string name="widget_unlock_hint">Tap to unlock</string>
 </resources>

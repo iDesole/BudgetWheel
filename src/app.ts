@@ -18,7 +18,8 @@ import { renderCategoryActivity, renderHistoryPeriod, renderHome, renderPastQuar
 import { renderWidget } from "./screens/widget.ts";
 import { isWidgetPath } from "./lib/widget.ts";
 import { applyTheme, watchSystemTheme } from "./lib/theme.ts";
-import { screen, state, subscribe, toastMessage, tourStep } from "./store.ts";
+import { watchWidgetOwned } from "./lib/android.ts";
+import { refreshUi, screen, state, subscribe, toastMessage, tourStep } from "./store.ts";
 import { mountReviewPrompt } from "./ui/review-prompt.ts";
 import { mountTour } from "./ui/tour.ts";
 import { fitWheelCenter } from "./ui/wheel.ts";
@@ -179,6 +180,7 @@ export function startApp(): void {
     () => state.theme,
     () => applyTheme(state.theme),
   );
+  watchWidgetOwned(() => refreshUi());
   subscribe(paint);
   paint();
 }

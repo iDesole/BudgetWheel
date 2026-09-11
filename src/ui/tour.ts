@@ -50,7 +50,7 @@ function stepCopy(step: number, empty: boolean): { title: string; body: string; 
   if (step === 5) {
     return {
       title: "Keep the wheel on your home screen",
-      body: "Tap Add Widget. You’ll see what’s left this month, and you can log purchases, without opening the app.",
+      body: "Home Widget is a $1.99 one-time unlock. After that, the wheel and purchases live on your home screen.",
       cta: "Next",
     };
   }

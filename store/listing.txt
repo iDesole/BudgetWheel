@@ -24,7 +24,7 @@ Start with real income. Choose salary or hourly, add your state, and get a month
 
 Give each category a dollar amount or a percent of income. Anything you do not assign becomes Extra Funds. Log spending with I purchased. Spending starts over on the 1st.
 
-Pin a home-screen widget — compact 2×2 or wider 4×2 — to see what’s left this month without opening the app. Dark is the default; Light and System live in Settings.
+Pin a home-screen widget — compact 2×2 or wider 4×2 — to see what’s left this month without opening the app. The widget is a $1.99 one-time unlock. Dark is the default; Light and System live in Settings.
 
 After a month ends, download your wheel: a picture plus a CSV you own. Files stay on the device unless you share them. Closed months, quarters, and years stay in Spending history.
 

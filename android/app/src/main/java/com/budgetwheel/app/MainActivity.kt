@@ -8,12 +8,9 @@ import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.view.View
-import android.view.WindowInsetsController
-import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -21,10 +18,12 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
 import com.budgetwheel.app.widget.WheelWidgetProvider
 
@@ -32,7 +31,7 @@ import com.budgetwheel.app.widget.WheelWidgetProvider
  * Hosts the Vite app in a local WebView and keeps the home-screen widget live.
  *
  * Bridge: writeBudget / readBudget / notifyWidgets / saveDownload /
- * openPlayStore / setChrome / pinWidget.
+ * openPlayStore / setChrome / pinWidget / widgetOwned / widgetPrice / buyWidget.
  * JS persist writes JSON; [BudgetStore.mergeBudgetJson] keeps widget purchases.
  * The widget refreshes after every budget write, on resume, and when prefs change.
  * No INTERNET — assets load from the APK via WebViewAssetLoader.
@@ -41,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var root: View
     private lateinit var web: WebView
     private lateinit var store: BudgetStore
+    private lateinit var billing: WidgetBilling
     private val budgetWatch =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key != BudgetStore.KEY_BUDGET) return@OnSharedPreferenceChangeListener
@@ -52,23 +52,22 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        if (Build.VERSION.SDK_INT >= 28) {
-            val attrs = window.attributes
-            attrs.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            window.attributes = attrs
-        }
-        if (Build.VERSION.SDK_INT >= 29) {
-            window.isStatusBarContrastEnforced = false
-            window.isNavigationBarContrastEnforced = false
-        }
         setContentView(R.layout.activity_main)
         root = findViewById(R.id.root)
         web = findViewById(R.id.web)
         store = BudgetStore(this)
         store.watchBudget(budgetWatch)
+        billing = WidgetBilling(this, store)
+        billing.onOwned = { owned ->
+            pushWidgetOwned(owned)
+            WheelWidgetProvider.refreshAll(this)
+        }
+        billing.start()
 
         val assetLoader = WebViewAssetLoader.Builder()
             .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
@@ -76,12 +75,13 @@ class MainActivity : AppCompatActivity() {
 
         web.setBackgroundColor(Color.parseColor("#0D0C10"))
         web.overScrollMode = View.OVER_SCROLL_NEVER
-        // Inset the host view. WebView ignores its own padding.
+        // Pad the host, not the WebView — WebView ignores its own padding.
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
             )
-            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
             WindowInsetsCompat.CONSUMED
         }
         ViewCompat.requestApplyInsets(root)
@@ -120,6 +120,7 @@ class MainActivity : AppCompatActivity() {
                     "(function(){var r=document.documentElement;r.style.setProperty('--safe-top','0px');r.style.setProperty('--safe-bot','0px');r.style.setProperty('--safe-left','0px');r.style.setProperty('--safe-right','0px');})()",
                     null,
                 )
+                pushWidgetOwned(store.widgetUnlocked())
                 pullBudgetIntoApp()
                 WheelWidgetProvider.refreshAll(this@MainActivity)
             }
@@ -141,12 +142,20 @@ class MainActivity : AppCompatActivity() {
 
         web.loadUrl("https://appassets.androidplatform.net/index.html")
         BudgetSync.attach { pullBudgetIntoApp() }
+        handleUnlockIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleUnlockIntent(intent)
     }
 
     override fun onResume() {
         super.onResume()
         if (this::root.isInitialized) ViewCompat.requestApplyInsets(root)
         applyDisplaySettings()
+        if (this::billing.isInitialized) billing.refresh()
         pullBudgetIntoApp()
         WheelWidgetProvider.refreshAll(this)
     }
@@ -158,9 +167,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (this::billing.isInitialized) billing.stop()
         if (this::store.isInitialized) store.unwatchBudget(budgetWatch)
         BudgetSync.detach()
         super.onDestroy()
+    }
+
+    private fun handleUnlockIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(WidgetBilling.EXTRA_UNLOCK, false) != true) return
+        if (!this::billing.isInitialized) return
+        if (store.widgetUnlocked()) return
+        billing.buy()
+    }
+
+    private fun pushWidgetOwned(owned: Boolean) {
+        if (!this::web.isInitialized) return
+        val flag = if (owned) "true" else "false"
+        web.evaluateJavascript(
+            "window.BudgetWheelWidgetOwned&&window.BudgetWheelWidgetOwned($flag)",
+            null,
+        )
     }
 
     private fun pullBudgetIntoApp() {
@@ -226,6 +252,7 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun pinWidget(): String {
+            if (!store.widgetUnlocked()) return "locked"
             val mgr = AppWidgetManager.getInstance(this@MainActivity)
             if (!mgr.isRequestPinAppWidgetSupported) return "unsupported"
             runOnUiThread {
@@ -235,6 +262,22 @@ class MainActivity : AppCompatActivity() {
                     null,
                 )
             }
+            return "ok"
+        }
+
+        @JavascriptInterface
+        fun widgetOwned(): String {
+            return if (store.widgetUnlocked()) "1" else "0"
+        }
+
+        @JavascriptInterface
+        fun widgetPrice(): String {
+            return if (this@MainActivity::billing.isInitialized) billing.priceLabel else "$1.99"
+        }
+
+        @JavascriptInterface
+        fun buyWidget(): String {
+            runOnUiThread { billing.buy() }
             return "ok"
         }
     }
@@ -247,25 +290,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyChrome(light: Boolean) {
         val color = if (light) Color.parseColor("#F3EFE6") else Color.parseColor("#0D0C10")
-        window.statusBarColor = color
-        window.navigationBarColor = color
-        if (this::root.isInitialized) root.setBackgroundColor(color)
-        web.setBackgroundColor(color)
-        if (Build.VERSION.SDK_INT >= 30) {
-            val flags =
-                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            window.insetsController?.setSystemBarsAppearance(if (light) flags else 0, flags)
-        } else {
-            @Suppress("DEPRECATION")
-            val decor = window.decorView
-            var vis = decor.systemUiVisibility
-            vis = if (light) {
-                vis or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        enableEdgeToEdge(
+            statusBarStyle = if (light) {
+                SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
             } else {
-                vis and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
-            }
-            decor.systemUiVisibility = vis
+                SystemBarStyle.dark(Color.TRANSPARENT)
+            },
+            navigationBarStyle = if (light) {
+                SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+            } else {
+                SystemBarStyle.dark(Color.TRANSPARENT)
+            },
+        )
+        window.decorView.setBackgroundColor(color)
+        if (this::root.isInitialized) root.setBackgroundColor(color)
+        if (this::web.isInitialized) web.setBackgroundColor(color)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
         }
     }
 

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="com.android.vending.BILLING" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -23,6 +25,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.BudgetWheel"
         android:usesCleartextTraffic="false"
+        android:resizeableActivity="true"
         android:enableOnBackInvokedCallback="true">
 
         <activity
@@ -30,7 +33,7 @@
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard|screenLayout|smallestScreenSize|density|fontScale|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="portrait"
+            android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

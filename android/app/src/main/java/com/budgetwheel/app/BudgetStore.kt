@@ -67,6 +67,12 @@ class BudgetStore(context: Context) {
         return bundle()?.state?.optBoolean("onboardingComplete") == true
     }
 
+    fun widgetUnlocked(): Boolean = prefs.getBoolean(KEY_WIDGET, false)
+
+    fun setWidgetUnlocked(owned: Boolean) {
+        prefs.edit().putBoolean(KEY_WIDGET, owned).apply()
+    }
+
     // -----------------------------------------------------------------------
     // Per-widget chrome (phase, pad, selected slice, chart). Not the budget.
     // -----------------------------------------------------------------------
@@ -349,6 +355,7 @@ class BudgetStore(context: Context) {
     companion object {
         const val PREFS = "budgetwheel"
         const val KEY_BUDGET = "budget_json"
+        const val KEY_WIDGET = "widget_unlock"
         const val PHASE_WHEEL = "wheel"
         const val PHASE_AMOUNT = "amount"
         const val PHASE_CATEGORY = "category"

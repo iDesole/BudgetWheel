@@ -156,6 +156,25 @@ input {
   overflow: hidden;
 }
 
+@media (min-width: 600px) {
+  #app {
+    max-width: 560px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .screen {
+    padding-top: calc(8px + var(--safe-top));
+    padding-bottom: calc(10px + var(--safe-bot));
+  }
+
+  .topbar,
+  .home-head {
+    min-height: 40px;
+    margin-bottom: 4px;
+  }
+}
+
 #app > div:first-child {
   height: 100%;
 }
