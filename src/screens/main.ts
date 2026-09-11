@@ -48,7 +48,7 @@ import {
 } from "../store.ts";
 import type { HistoryScale, WheelSnapshot } from "../types.ts";
 import { EXTRA_FUNDS_ID, NOT_IN_BUDGET_ID, budgetSpendTotals, extraFundsCardStats } from "../lib/categories.ts";
-import { buyHomeWidget, openPlayStore, pinHomeWidget, widgetPriceLabel, widgetUnlockState } from "../lib/android.ts";
+import { buyHomeWidget, openPlayStore, pinHomeWidget, redeemWidgetCode, widgetPriceLabel, widgetUnlockState } from "../lib/android.ts";
 import { downloadHistoryWheels } from "../lib/history-export.ts";
 import { extraInFromTransactions, periodLabel, periodWord } from "../lib/history.ts";
 import { openCategoryBudget, openColorPicker, openIncomeSource } from "./onboarding.ts";
@@ -1339,12 +1339,36 @@ export function renderSettings(): HTMLElement {
           <p class="sub">See what’s left this month and log a purchase without opening the app.</p>
           <p class="sub">${price} one-time. Yours on this Google account after you buy.</p>
           <button type="button" class="btn btn-primary btn-xl" data-widget-buy>Unlock for ${price}</button>
+          <label class="field">
+            <span class="field-label">Promo code</span>
+            <input class="text-input" type="text" autocomplete="off" spellcheck="false" data-widget-code placeholder="Enter code" />
+          </label>
+          <p class="field-error" data-widget-code-err hidden></p>
+          <button type="button" class="btn btn-ghost" data-widget-redeem>Redeem code</button>
           <button type="button" class="btn btn-ghost" data-widget-ok>Not now</button>
         </div>`;
       el.querySelector(".screen")?.append(sheet);
+      const codeInput = sheet.querySelector<HTMLInputElement>("[data-widget-code]");
+      const codeErr = sheet.querySelector<HTMLElement>("[data-widget-code-err]");
       sheet.querySelector("[data-widget-buy]")?.addEventListener("click", () => {
         buyHomeWidget();
-        sheet.remove();
+      });
+      sheet.querySelector("[data-widget-redeem]")?.addEventListener("click", () => {
+        const result = redeemWidgetCode(codeInput?.value ?? "");
+        if (result === "ok") {
+          sheet.remove();
+          showToast("Widget unlocked");
+          return;
+        }
+        if (codeErr) {
+          codeErr.hidden = false;
+          codeErr.textContent = "That code doesn’t work.";
+        }
+      });
+      codeInput?.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        (sheet.querySelector("[data-widget-redeem]") as HTMLButtonElement | null)?.click();
       });
       sheet.querySelector("[data-widget-ok]")?.addEventListener("click", () => sheet.remove());
       sheet.addEventListener("click", (ev) => {

@@ -6,7 +6,7 @@
  * write, so native mergeBudgetJson can keep purchases the widget logged while
  * the WebView was saving. pullBudgetFromAndroid is the other direction.
  * Extra JS methods: saveDownload, openPlayStore, setChrome, pinWidget,
- * widgetOwned, widgetPrice, buyWidget.
+ * widgetOwned, widgetPrice, buyWidget, redeemWidgetCode.
  */
 import { getCachedUser, getToken } from "../auth.ts";
 import { sanitizeState } from "./sanitize.ts";
@@ -24,6 +24,7 @@ interface AndroidBridge {
   widgetOwned?(): string;
   widgetPrice?(): string;
   buyWidget?(): string;
+  redeemWidgetCode?(code: string): string;
 }
 
 function bridge(): AndroidBridge | null {
@@ -109,6 +110,14 @@ export function buyHomeWidget(): void {
     bridge()?.buyWidget?.();
   } catch {
     /* Play Billing not ready */
+  }
+}
+
+export function redeemWidgetCode(code: string): "ok" | "invalid" {
+  try {
+    return bridge()?.redeemWidgetCode?.(code) === "ok" ? "ok" : "invalid";
+  } catch {
+    return "invalid";
   }
 }
 

@@ -31,7 +31,7 @@ import com.budgetwheel.app.widget.WheelWidgetProvider
  * Hosts the Vite app in a local WebView and keeps the home-screen widget live.
  *
  * Bridge: writeBudget / readBudget / notifyWidgets / saveDownload /
- * openPlayStore / setChrome / pinWidget / widgetOwned / widgetPrice / buyWidget.
+ * openPlayStore / setChrome / pinWidget / widgetOwned / widgetPrice / buyWidget / redeemWidgetCode.
  * JS persist writes JSON; [BudgetStore.mergeBudgetJson] keeps widget purchases.
  * The widget refreshes after every budget write, on resume, and when prefs change.
  * No INTERNET — assets load from the APK via WebViewAssetLoader.
@@ -278,6 +278,17 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun buyWidget(): String {
             runOnUiThread { billing.buy() }
+            return "ok"
+        }
+
+        @JavascriptInterface
+        fun redeemWidgetCode(code: String): String {
+            if (!code.trim().equals("ScruffyisGreat")) return "invalid"
+            store.setWidgetUnlocked(true)
+            runOnUiThread {
+                pushWidgetOwned(true)
+                WheelWidgetProvider.refreshAll(this@MainActivity)
+            }
             return "ok"
         }
     }

@@ -1,6 +1,9 @@
 package com.budgetwheel.app
 
 import android.app.Activity
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -16,6 +19,7 @@ import com.android.billingclient.api.QueryPurchasesParams
 /**
  * One-time Play purchase for the home-screen widget. Product id [PRODUCT_ID]
  * must exist in Play Console as a managed product priced $1.99 USD.
+ * Never consumes the item. Promo unlocks stay local and are not cleared.
  */
 class WidgetBilling(
     private val activity: Activity,
@@ -25,29 +29,43 @@ class WidgetBilling(
     var priceLabel: String = "$1.99"
         private set
 
+    private val main = Handler(Looper.getMainLooper())
     private var client: BillingClient? = null
     private var details: ProductDetails? = null
+    private var offerToken: String? = null
     private var pendingBuy = false
+    private var launching = false
 
     fun start() {
-        if (client != null) return
+        val existing = client
+        if (existing != null) {
+            if (existing.isReady) {
+                queryProduct()
+                queryOwned()
+            }
+            return
+        }
         val billing = BillingClient.newBuilder(activity)
             .setListener(this)
             .enablePendingPurchases(
                 PendingPurchasesParams.newBuilder().enableOneTimeProducts().build(),
             )
+            .enableAutoServiceReconnection()
             .build()
         client = billing
         billing.startConnection(
             object : BillingClientStateListener {
                 override fun onBillingSetupFinished(result: BillingResult) {
-                    if (result.responseCode != BillingClient.BillingResponseCode.OK) return
+                    if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                        if (pendingBuy) failBuy()
+                        return
+                    }
                     queryProduct()
                     queryOwned()
                 }
 
                 override fun onBillingServiceDisconnected() {
-                    client = null
+                    /* auto-reconnect is enabled */
                 }
             },
         )
@@ -55,46 +73,76 @@ class WidgetBilling(
 
     fun stop() {
         pendingBuy = false
+        launching = false
         client?.endConnection()
         client = null
     }
 
     fun refresh() {
-        if (client?.isReady == true) queryOwned() else start()
+        if (client?.isReady == true) {
+            queryOwned()
+            if (details == null) queryProduct()
+        } else {
+            start()
+        }
     }
 
     fun buy() {
-        if (store.widgetUnlocked()) {
-            onOwned?.invoke(true)
-            return
-        }
-        val ready = client
-        val product = details
-        if (ready == null || !ready.isReady || product == null) {
+        main.post {
+            if (store.widgetUnlocked()) {
+                onOwned?.invoke(true)
+                return@post
+            }
+            val ready = client
+            val product = details
+            if (ready != null && ready.isReady && product != null) {
+                launch(ready, product)
+                return@post
+            }
             pendingBuy = true
-            start()
-            return
-        }
-        val params = BillingFlowParams.newBuilder()
-            .setProductDetailsParamsList(
-                listOf(
-                    BillingFlowParams.ProductDetailsParams.newBuilder()
-                        .setProductDetails(product)
-                        .build(),
-                ),
-            )
-            .build()
-        val result = ready.launchBillingFlow(activity, params)
-        if (result.responseCode == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) {
-            markOwned()
+            if (ready?.isReady == true) queryProduct() else start()
         }
     }
 
     override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
+        launching = false
         when (result.responseCode) {
             BillingClient.BillingResponseCode.OK -> applyPurchases(purchases.orEmpty())
             BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> queryOwned()
-            else -> Unit
+            BillingClient.BillingResponseCode.USER_CANCELED -> pendingBuy = false
+            else -> if (pendingBuy) failBuy()
+        }
+    }
+
+    private fun launch(ready: BillingClient, product: ProductDetails) {
+        if (launching) return
+        pendingBuy = false
+        val builder = BillingFlowParams.ProductDetailsParams.newBuilder()
+            .setProductDetails(product)
+        val token = offerToken
+        if (token.isNullOrBlank()) {
+            failBuy()
+            return
+        }
+        builder.setOfferToken(token)
+        launching = true
+        val result = ready.launchBillingFlow(
+            activity,
+            BillingFlowParams.newBuilder()
+                .setProductDetailsParamsList(listOf(builder.build()))
+                .build(),
+        )
+        when (result.responseCode) {
+            BillingClient.BillingResponseCode.OK -> Unit
+            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> {
+                launching = false
+                markOwned()
+            }
+            BillingClient.BillingResponseCode.USER_CANCELED -> launching = false
+            else -> {
+                launching = false
+                failBuy()
+            }
         }
     }
 
@@ -107,15 +155,24 @@ class WidgetBilling(
         val params = QueryProductDetailsParams.newBuilder()
             .setProductList(listOf(product))
             .build()
-        ready.queryProductDetailsAsync(params) { result, list ->
-            if (result.responseCode != BillingClient.BillingResponseCode.OK) return@queryProductDetailsAsync
-            val item = list.firstOrNull() ?: return@queryProductDetailsAsync
+        ready.queryProductDetailsAsync(params) { result, queryResult ->
+            if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+                if (pendingBuy) failBuy()
+                return@queryProductDetailsAsync
+            }
+            val item = queryResult.productDetailsList.firstOrNull()
+            if (item == null) {
+                if (pendingBuy) failBuy()
+                return@queryProductDetailsAsync
+            }
             details = item
-            val formatted = item.oneTimePurchaseOfferDetails?.formattedPrice
+            val offer = item.oneTimePurchaseOfferDetailsList?.firstOrNull()
+            offerToken = offer?.offerToken
+            val formatted = offer?.formattedPrice
             if (!formatted.isNullOrBlank()) priceLabel = formatted
             if (pendingBuy) {
                 pendingBuy = false
-                activity.runOnUiThread { buy() }
+                buy()
             }
         }
     }
@@ -151,12 +208,22 @@ class WidgetBilling(
     }
 
     private fun markOwned() {
-        if (store.widgetUnlocked()) {
-            activity.runOnUiThread { onOwned?.invoke(true) }
-            return
+        pendingBuy = false
+        launching = false
+        if (!store.widgetUnlocked()) store.setWidgetUnlocked(true)
+        main.post { onOwned?.invoke(true) }
+    }
+
+    private fun failBuy() {
+        pendingBuy = false
+        launching = false
+        main.post {
+            Toast.makeText(
+                activity,
+                "Couldn't start the purchase. Try again.",
+                Toast.LENGTH_SHORT,
+            ).show()
         }
-        store.setWidgetUnlocked(true)
-        activity.runOnUiThread { onOwned?.invoke(true) }
     }
 
     companion object {
