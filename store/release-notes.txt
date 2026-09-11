@@ -10,12 +10,11 @@ Release name
 Release notes (en-US) — What’s new
 Play limit: 500 characters
 ================================================================
-Android 15/16 display, light mode, and widget polish.
+Home-screen widget is now a $1.99 one-time unlock.
 
-• Draws edge-to-edge and clears the camera, clock, and nav bar
-• Works in landscape and on tablets and foldables
-• Light appearance is a plain paper look — no extra glow
+• Pin the wheel and log purchases from your home screen
+• Light mode is a plain paper look
 • App icon is the wheel on black
-• Light home-screen widget matches the app
+• Layout clears the camera hole, clock, and battery
 
 Privacy is unchanged: everything stays on this device.
