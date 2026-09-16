@@ -83,8 +83,12 @@ Income, categories, and purchases stay on this device. The Android app does not 
 
 ## License and copyright
 
-Copyright (c) 2026 iDesole. All rights reserved.
+Copyright (c) 2026 Chase Wilson. All rights reserved.
 
 This repository is public so the project can be reviewed. It is **not** open source. See [LICENSE](LICENSE).
 
 Outfit is included under the SIL Open Font License, Version 1.1. See [NOTICE](NOTICE) and [public/fonts/OFL.txt](public/fonts/OFL.txt).
+
+## Author
+
+Chase Wilson — [chasewilsonbusiness@gmail.com](mailto:chasewilsonbusiness@gmail.com)
