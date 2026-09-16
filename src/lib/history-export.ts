@@ -3,7 +3,7 @@
  *
  * Layout, top to bottom:
  *   1. Title + date range
- *   2. Budgeted / spent / out of budget / left (same numbers as the in-app graph header)
+ *   2. Income / budgeted / spent, then money-left / budget-left / out of budget (same as the in-app graph header)
  *   3. One bar card per category (same shape as the live graph)
  *   4. Purchases grouped by category
  */
@@ -254,42 +254,50 @@ class HistoryPdf {
     spent: number;
     outOfBudget: number;
     remaining: number;
+    moneyLeft: number;
   }): void {
     const h = 96;
     this.ensure(h + 12);
     const bottom = this.y - h;
     this.card(MARGIN, bottom, CONTENT_W, h);
-    this.text("Income", { x: MARGIN + 14, y: this.y - 20, size: 8, color: soft });
-    this.text(money(opts.income), { x: MARGIN + 14, y: this.y - 38, size: 14, bold: true });
-    const oob = opts.outOfBudget > 0.009;
-    const oobLbl = "Out of budget";
-    const oobVal = money(opts.outOfBudget);
-    const oobLblW = this.font.widthOfTextAtSize(oobLbl, 8);
-    const oobValW = this.bold.widthOfTextAtSize(pdfSafe(oobVal), 14);
-    const oobRight = PAGE_W - MARGIN - 14;
-    this.text(oobLbl, { x: oobRight - oobLblW, y: this.y - 20, size: 8, color: soft });
-    this.text(oobVal, {
-      x: oobRight - oobValW,
-      y: this.y - 38,
-      size: 14,
-      bold: true,
-      color: oob ? err : on,
-    });
     const cols = 3;
     const gap = 8;
     const inner = CONTENT_W - 28;
     const cellW = (inner - gap * (cols - 1)) / cols;
+    const head = [
+      { val: money(opts.income), lbl: "Income", warn: false },
+      { val: opts.envelope > 0 ? money(opts.envelope) : "-", lbl: "Budgeted", warn: false },
+      { val: money(opts.spent), lbl: "Spent", warn: false },
+    ];
+    head.forEach((col, i) => {
+      const x = MARGIN + 14 + i * (cellW + gap);
+      const lw = this.font.widthOfTextAtSize(col.lbl, 8);
+      const vw = this.bold.widthOfTextAtSize(pdfSafe(col.val), 12);
+      this.text(col.lbl, { x: x + (cellW - lw) / 2, y: this.y - 18, size: 8, color: soft });
+      this.text(col.val, {
+        x: x + (cellW - Math.min(vw, cellW - 8)) / 2,
+        y: this.y - 36,
+        size: 12,
+        bold: true,
+      });
+    });
     const cellH = 36;
     const cellY = bottom + 12;
     const over = opts.remaining < 0;
+    const moneyOver = opts.moneyLeft < 0;
+    const oob = opts.outOfBudget > 0.009;
     const cells = [
-      { val: opts.envelope > 0 ? money(opts.envelope) : "-", lbl: "budgeted", warn: false },
-      { val: money(opts.spent), lbl: "spent", warn: false },
+      {
+        val: money(moneyOver ? -opts.moneyLeft : opts.moneyLeft),
+        lbl: "money-left",
+        warn: moneyOver,
+      },
       {
         val: money(over ? -opts.remaining : opts.remaining),
         lbl: over ? "over-Budget" : "budget-left",
         warn: over,
       },
+      { val: money(opts.outOfBudget), lbl: "out of budget", warn: oob },
     ];
     cells.forEach((cell, i) => {
       const x = MARGIN + 14 + i * (cellW + gap);
@@ -454,6 +462,7 @@ async function buildHistoryPdf(snap: WheelSnapshot): Promise<Uint8Array> {
     spent: totalSpent,
     outOfBudget,
     remaining: totals.remaining,
+    moneyLeft: totals.moneyLeft,
   });
   pdf.drawBars(slices);
   pdf.drawPurchases(slices, txs);

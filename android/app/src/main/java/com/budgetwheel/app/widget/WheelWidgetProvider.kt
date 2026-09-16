@@ -244,7 +244,7 @@ class WheelWidgetProvider : AppWidgetProvider() {
             )
             applyChrome(context, store, views)
             val ready = store.onboarded()
-            val left = store.budgetLeft()
+            val left = store.moneyLeft()
             val over = left < 0
             val on = context.getColor(if (widgetLight(context, store)) R.color.bw_on_light else R.color.bw_on)
             val soft = context.getColor(if (widgetLight(context, store)) R.color.bw_soft_light else R.color.bw_soft)
@@ -322,6 +322,7 @@ class WheelWidgetProvider : AppWidgetProvider() {
             val graph = ready && store.chartMode(id) == "bars"
             val hasSlices = ready && store.slices().isNotEmpty()
             views.setViewVisibility(R.id.widget_wheel_wrap, if (ready && !graph) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.widget_wheel_totals, if (ready && !graph) View.VISIBLE else View.GONE)
             views.setViewVisibility(R.id.widget_graph_list_wrap, if (graph) View.VISIBLE else View.GONE)
             views.setViewVisibility(R.id.widget_graph_list, if (graph) View.VISIBLE else View.GONE)
             views.setViewVisibility(R.id.widget_graph_detail, if (graph) View.VISIBLE else View.GONE)
@@ -399,32 +400,36 @@ class WheelWidgetProvider : AppWidgetProvider() {
             val assigned = store.assignedSlices()
             val left = assigned.sumOf { it.envelope } - assigned.sumOf { it.spent }
             val over = left < 0
+            val money = store.moneyLeft()
+            val moneyOver = money < 0
             val oob = store.outOfBudgetSpend()
             val chip = statBg(store, context)
+            val on = onInk(context, store)
+            val soft = softInk(context, store)
+            val err = errInk(context, store)
+            views.setInt(R.id.widget_wheel_money_box, "setBackgroundResource", chip)
             views.setInt(R.id.widget_wheel_corner, "setBackgroundResource", chip)
             views.setInt(R.id.widget_wheel_left_wrap, "setBackgroundResource", chip)
-            views.setTextColor(R.id.widget_wheel_oob_val, onInk(context, store))
-            views.setTextColor(R.id.widget_wheel_oob_lbl, softInk(context, store))
-            views.setTextColor(R.id.widget_wheel_left_lbl, softInk(context, store))
-            views.setViewVisibility(R.id.widget_wheel_corner, View.VISIBLE)
-            views.setViewVisibility(R.id.widget_wheel_left_wrap, View.VISIBLE)
-            views.setTextViewText(R.id.widget_wheel_oob_val, BudgetStore.money(oob))
-            views.setTextColor(
-                R.id.widget_wheel_oob_val,
-                if (oob > 0.009) errInk(context, store) else onInk(context, store),
+            views.setViewVisibility(R.id.widget_wheel_totals, View.VISIBLE)
+            views.setTextViewText(
+                R.id.widget_wheel_money_val,
+                BudgetStore.money(if (moneyOver) -money else money),
             )
+            views.setTextColor(R.id.widget_wheel_money_val, if (moneyOver) err else on)
+            views.setTextColor(R.id.widget_wheel_money_lbl, soft)
             views.setTextViewText(
                 R.id.widget_wheel_left_val,
                 BudgetStore.money(if (over) -left else left),
             )
-            views.setTextColor(
-                R.id.widget_wheel_left_val,
-                if (over) errInk(context, store) else onInk(context, store),
-            )
+            views.setTextColor(R.id.widget_wheel_left_val, if (over) err else on)
+            views.setTextColor(R.id.widget_wheel_left_lbl, soft)
             views.setTextViewText(
                 R.id.widget_wheel_left_lbl,
                 context.getString(if (over) R.string.widget_stat_over else R.string.widget_stat_left),
             )
+            views.setTextViewText(R.id.widget_wheel_oob_val, BudgetStore.money(oob))
+            views.setTextColor(R.id.widget_wheel_oob_val, if (oob > 0.009) err else on)
+            views.setTextColor(R.id.widget_wheel_oob_lbl, soft)
         }
 
         private fun bindGraphDetail(
@@ -447,7 +452,12 @@ class WheelWidgetProvider : AppWidgetProvider() {
             views.setTextColor(R.id.widget_stat_budgeted_lbl, softInk(context, store))
             views.setTextColor(R.id.widget_stat_spent_lbl, softInk(context, store))
             views.setTextColor(R.id.widget_stat_left_lbl, softInk(context, store))
-            views.setTextColor(R.id.widget_graph_oob_lbl, softInk(context, store))
+            val on = onInk(context, store)
+            val soft = softInk(context, store)
+            val err = errInk(context, store)
+            views.setTextColor(R.id.widget_graph_r1_income, on)
+            views.setTextColor(R.id.widget_graph_r1_budgeted, on)
+            views.setTextColor(R.id.widget_graph_r1_spent, on)
             val slices = store.slices()
             val slice = selectedId?.let { id -> slices.find { it.id == id } }
             val envelope: Double
@@ -456,35 +466,34 @@ class WheelWidgetProvider : AppWidgetProvider() {
             val left: Double
             var outOfBudget = 0.0
             if (slice != null) {
+                views.setViewVisibility(R.id.widget_graph_selected_head, View.VISIBLE)
+                views.setViewVisibility(R.id.widget_graph_totals_head, View.GONE)
                 views.setViewVisibility(R.id.widget_graph_swatch, View.VISIBLE)
-                views.setViewVisibility(R.id.widget_graph_income, View.GONE)
-                views.setViewVisibility(R.id.widget_graph_oob_head, View.GONE)
                 views.setImageViewBitmap(R.id.widget_graph_swatch, WidgetBitmaps.swatch(context, slice.color))
                 views.setTextViewText(R.id.widget_graph_name, slice.name)
                 views.setTextViewTextSize(R.id.widget_graph_name, TypedValue.COMPLEX_UNIT_SP, 15f)
-                views.setTextColor(R.id.widget_graph_name, onInk(context, store))
+                views.setTextColor(R.id.widget_graph_name, on)
                 views.setTextViewTextSize(R.id.widget_graph_share, TypedValue.COMPLEX_UNIT_SP, 12f)
-                views.setTextColor(R.id.widget_graph_share, softInk(context, store))
+                views.setTextColor(R.id.widget_graph_share, soft)
                 envelope = slice.envelope
                 spent = slice.spent
                 budgeted = slice.budgeted
                 left = envelope - spent
             } else {
-                views.setViewVisibility(R.id.widget_graph_swatch, View.GONE)
-                views.setViewVisibility(R.id.widget_graph_income, View.GONE)
-                views.setViewVisibility(R.id.widget_graph_oob_head, View.VISIBLE)
-                views.setTextViewText(R.id.widget_graph_name, context.getString(R.string.widget_income_title))
-                views.setTextViewTextSize(R.id.widget_graph_name, TypedValue.COMPLEX_UNIT_SP, 12f)
-                views.setTextColor(R.id.widget_graph_name, softInk(context, store))
-                views.setTextViewText(R.id.widget_graph_share, BudgetStore.money(store.income()))
-                views.setTextViewTextSize(R.id.widget_graph_share, TypedValue.COMPLEX_UNIT_SP, 16f)
-                views.setTextColor(R.id.widget_graph_share, onInk(context, store))
+                views.setViewVisibility(R.id.widget_graph_selected_head, View.GONE)
+                views.setViewVisibility(R.id.widget_graph_totals_head, View.VISIBLE)
                 val assigned = store.assignedSlices()
                 envelope = assigned.sumOf { it.envelope }
                 outOfBudget = store.outOfBudgetSpend()
                 spent = store.totalSpend()
                 budgeted = assigned.sumOf { it.budgeted }
                 left = envelope - assigned.sumOf { it.spent }
+                views.setTextViewText(R.id.widget_graph_r1_income, BudgetStore.money(store.income()))
+                views.setTextViewText(
+                    R.id.widget_graph_r1_budgeted,
+                    if (envelope > 0) BudgetStore.money(envelope) else "—",
+                )
+                views.setTextViewText(R.id.widget_graph_r1_spent, BudgetStore.money(spent))
             }
             val income = store.monthlyIncome()
             if (slice != null) {
@@ -498,11 +507,6 @@ class WheelWidgetProvider : AppWidgetProvider() {
                 }
                 views.setTextViewText(R.id.widget_graph_share, share)
             }
-            views.setTextViewText(R.id.widget_graph_oob_head_val, BudgetStore.money(outOfBudget))
-            views.setTextColor(
-                R.id.widget_graph_oob_head_val,
-                if (outOfBudget > 0.009) errInk(context, store) else onInk(context, store),
-            )
             if (slice?.id == BudgetStore.EXTRA_FUNDS_ID) {
                 val added = store.extraFundsAdded()
                 val monthFunds = max(0.0, slice.envelope - added)
@@ -512,15 +516,15 @@ class WheelWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_stat_spent_lbl, context.getString(R.string.widget_stat_added_funds))
                 views.setTextColor(
                     R.id.widget_stat_spent,
-                    if (added > 0.009) primaryInk(context, store) else onInk(context, store),
+                    if (added > 0.009) primaryInk(context, store) else on,
                 )
                 views.setTextViewText(R.id.widget_stat_left, BudgetStore.money(slice.spent))
                 views.setTextViewText(R.id.widget_stat_left_lbl, context.getString(R.string.widget_stat_funds_lost))
                 views.setTextColor(
                     R.id.widget_stat_left,
-                    if (slice.spent > 0.009) errInk(context, store) else onInk(context, store),
+                    if (slice.spent > 0.009) err else on,
                 )
-            } else {
+            } else if (slice != null) {
                 val over = left < 0
                 views.setTextViewText(
                     R.id.widget_stat_budgeted,
@@ -529,16 +533,32 @@ class WheelWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_stat_budgeted_lbl, context.getString(R.string.widget_stat_budgeted))
                 views.setTextViewText(R.id.widget_stat_spent, BudgetStore.money(spent))
                 views.setTextViewText(R.id.widget_stat_spent_lbl, context.getString(R.string.widget_stat_spent))
-                views.setTextColor(R.id.widget_stat_spent, onInk(context, store))
+                views.setTextColor(R.id.widget_stat_spent, on)
                 views.setTextViewText(R.id.widget_stat_left, BudgetStore.money(if (over) -left else left))
-                views.setTextColor(
-                    R.id.widget_stat_left,
-                    if (over) errInk(context, store) else onInk(context, store),
-                )
+                views.setTextColor(R.id.widget_stat_left, if (over) err else on)
                 views.setTextViewText(
                     R.id.widget_stat_left_lbl,
                     context.getString(if (over) R.string.widget_stat_over else R.string.widget_stat_left),
                 )
+            } else {
+                val money = store.moneyLeft()
+                val moneyOver = money < 0
+                val over = left < 0
+                views.setTextViewText(
+                    R.id.widget_stat_budgeted,
+                    BudgetStore.money(if (moneyOver) -money else money),
+                )
+                views.setTextViewText(R.id.widget_stat_budgeted_lbl, context.getString(R.string.widget_stat_money_left))
+                views.setTextColor(R.id.widget_stat_budgeted, if (moneyOver) err else on)
+                views.setTextViewText(R.id.widget_stat_spent, BudgetStore.money(if (over) -left else left))
+                views.setTextViewText(
+                    R.id.widget_stat_spent_lbl,
+                    context.getString(if (over) R.string.widget_stat_over else R.string.widget_stat_left),
+                )
+                views.setTextColor(R.id.widget_stat_spent, if (over) err else on)
+                views.setTextViewText(R.id.widget_stat_left, BudgetStore.money(outOfBudget))
+                views.setTextViewText(R.id.widget_stat_left_lbl, context.getString(R.string.widget_stat_oob))
+                views.setTextColor(R.id.widget_stat_left, if (outOfBudget > 0.009) err else on)
             }
         }
 
@@ -637,7 +657,7 @@ class WheelWidgetProvider : AppWidgetProvider() {
             val opts = manager.getAppWidgetOptions(id)
             val minW = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 200)
             val minH = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 250)
-            val wheelDp = kotlin.math.min(minW - 28, minH - 120).coerceIn(160, 280)
+            val wheelDp = kotlin.math.min(minW - 44, minH - 156).coerceIn(140, 252)
             val px = TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP,
                 wheelDp.toFloat(),

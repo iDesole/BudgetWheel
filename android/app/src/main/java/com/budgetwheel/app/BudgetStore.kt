@@ -244,6 +244,15 @@ class BudgetStore(context: Context) {
         val cats = state.optJSONArray("categories") ?: return emptyList()
         val spent = spentMap(state)
         val extraIn = extraInThisMonth(state)
+        val takeHome = takeHomeThisMonth(state)
+        var assigned = 0.0
+        for (i in 0 until cats.length()) {
+            val row = cats.optJSONObject(i) ?: continue
+            if (row.optBoolean("hidden")) continue
+            if (row.optString("id") == EXTRA_FUNDS_ID) continue
+            assigned += row.optDouble("budgeted", 0.0)
+        }
+        val extraEnvelope = roundCents(takeHome + extraIn - assigned)
         val out = ArrayList<Slice>()
         for (i in 0 until cats.length()) {
             val c = cats.optJSONObject(i) ?: continue
@@ -252,7 +261,7 @@ class BudgetStore(context: Context) {
             val budgeted = c.optDouble("budgeted", 0.0)
             val used = spent[id] ?: 0.0
             if (onlyOnWheel && id != EXTRA_FUNDS_ID && budgeted <= 0.009 && used <= 0.009) continue
-            val envelope = if (id == EXTRA_FUNDS_ID) roundCents(budgeted + extraIn) else roundCents(budgeted)
+            val envelope = if (id == EXTRA_FUNDS_ID) extraEnvelope else roundCents(budgeted)
             out.add(
                 Slice(
                     id = id,
@@ -290,6 +299,13 @@ class BudgetStore(context: Context) {
     fun budgetLeft(): Double {
         val assigned = assignedSlices()
         return roundCents(assigned.sumOf { it.envelope } - assigned.sumOf { it.spent })
+    }
+
+    /** Unspent assigned budgets plus Extra Funds remaining (after out-of-budget). */
+    fun moneyLeft(): Double {
+        val extra = slices().find { it.id == EXTRA_FUNDS_ID }
+        val extraLeft = extra?.let { roundCents(it.envelope - it.spent) } ?: 0.0
+        return roundCents(budgetLeft() + extraLeft)
     }
 
     fun themePref(): String = bundle()?.state?.optString("theme", "dark") ?: "dark"
@@ -344,7 +360,7 @@ class BudgetStore(context: Context) {
     /** Take-home plus Extra Funds cash-in this month. Shown in the wheel center. */
     fun income(): Double {
         val state = bundle()?.state ?: return 0.0
-        return roundCents(monthlyIncome() + extraInThisMonth(state))
+        return roundCents(takeHomeThisMonth(state) + extraInThisMonth(state))
     }
 
     fun extraFundsAdded(): Double {
@@ -488,6 +504,48 @@ class BudgetStore(context: Context) {
                 map[id] = (map[id] ?: 0.0) + tx.optDouble("amount")
             }
             return map
+        }
+
+        /** JS weekday 0=Sunday. Count hits in the current calendar month. */
+        private fun weekdayCountInMonth(jsWeekday: Int): Int {
+            val cal = Calendar.getInstance()
+            val year = cal.get(Calendar.YEAR)
+            val month = cal.get(Calendar.MONTH)
+            cal.set(year, month, 1)
+            val firstDow = cal.get(Calendar.DAY_OF_WEEK)
+            val target = jsWeekday + 1
+            val offset = (target - firstDow + 7) % 7
+            val firstHit = 1 + offset
+            val lastDate = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+            if (firstHit > lastDate) return 0
+            return (lastDate - firstHit) / 7 + 1
+        }
+
+        /** Hourly sources with a payday use this month's weekday count. Salary is unchanged. */
+        private fun takeHomeThisMonth(state: JSONObject): Double {
+            val income = state.optJSONObject("income") ?: return 0.0
+            val sources = income.optJSONArray("sources")
+            if (sources == null || sources.length() == 0) {
+                return roundCents(income.optDouble("monthlyTakeHome"))
+            }
+            var sum = 0.0
+            for (i in 0 until sources.length()) {
+                val source = sources.optJSONObject(i) ?: continue
+                if (source.optString("id") == ADDED_FUNDS_ID) continue
+                val monthly = source.optDouble("monthlyTakeHome")
+                val type = source.optString("type")
+                val pay = if (source.has("payWeekday") && !source.isNull("payWeekday")) {
+                    source.optInt("payWeekday", -1)
+                } else {
+                    -1
+                }
+                sum += if (type == "hourly" && pay in 0..6) {
+                    monthly * 12.0 / 52.0 * weekdayCountInMonth(pay)
+                } else {
+                    monthly
+                }
+            }
+            return roundCents(sum)
         }
 
         private fun extraInThisMonth(state: JSONObject): Double {

@@ -189,7 +189,14 @@ export function extraFundsCardStats(
 /** Extra Funds is leftover income, never budget spending. Spent includes out-of-budget. */
 export function budgetSpendTotals(
   slices: Array<{ id: string; envelope: number; spent: number; budgeted?: number }>,
-): { envelope: number; spent: number; outOfBudget: number; remaining: number; budgeted: number } {
+): {
+  envelope: number;
+  spent: number;
+  outOfBudget: number;
+  remaining: number;
+  budgeted: number;
+  moneyLeft: number;
+} {
   const assigned = slices.filter((s) => isAssignedBudget(s.id, s.envelope));
   const envelope = assigned.reduce((sum, c) => sum + c.envelope, 0);
   const assignedSpend = assigned.reduce((sum, c) => sum + c.spent, 0);
@@ -197,12 +204,16 @@ export function budgetSpendTotals(
     .filter((s) => isOutOfBudgetSpend(s.id, s.envelope))
     .reduce((sum, c) => sum + c.spent, 0);
   const budgeted = assigned.reduce((sum, c) => sum + (c.budgeted ?? c.envelope), 0);
+  const remaining = envelope - assignedSpend;
+  const extra = slices.find((s) => s.id === EXTRA_FUNDS_ID);
+  const extraRemaining = extra ? extra.envelope - extra.spent : 0;
   return {
     envelope,
     spent: assignedSpend + outOfBudget,
     outOfBudget,
-    remaining: envelope - assignedSpend,
+    remaining,
     budgeted,
+    moneyLeft: remaining + extraRemaining,
   };
 }
 

@@ -4,17 +4,17 @@ Paste into Play Console > Test and release > Production (or testing) > Create re
 ================================================================
 Release name
 ================================================================
-1.1.4
+1.1.5
 
 ================================================================
 Release notes (en-US) — What’s new
 Play limit: 500 characters
 ================================================================
-Home-screen widget is now a $1.99 one-time unlock.
+See what’s left — and match hourly pay to the calendar.
 
-• Pin the wheel and log purchases from your home screen
-• Light mode is a plain paper look
-• App icon is the wheel on black
-• Layout clears the camera hole, clock, and battery
+• Money-left, budget-left, and out of budget on the wheel, graph, and widget
+• Graph shows income, budgeted, and spent, then those leftover tabs
+• Hourly setup asks which weekday you get paid (skip if you don’t have a set day)
+• A month with five paydays shows five paychecks; salary is unchanged
 
 Privacy is unchanged: everything stays on this device.

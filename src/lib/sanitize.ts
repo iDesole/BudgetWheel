@@ -52,7 +52,13 @@ function sanitizeSource(raw: unknown, index: number): IncomeSource | null {
     monthlyTakeHome: clampMoney(finiteNumber(o.monthlyTakeHome)),
     estimatedTaxAnnual: clampMoney(finiteNumber(o.estimatedTaxAnnual)),
     takeHomeOverridden: Boolean(o.takeHomeOverridden),
+    payWeekday: sanitizePayWeekday(o.payWeekday),
   };
+}
+
+function sanitizePayWeekday(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 6) return undefined;
+  return value;
 }
 
 function sanitizeIncome(raw: unknown): Income | null {

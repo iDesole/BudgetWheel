@@ -175,7 +175,7 @@ export async function downloadMonthWheel(opts?: { theme?: ThemePref }): Promise<
   const theme = resolvedTheme(opts?.theme ?? state.theme);
   const png = await paintWheelPng(slices, {
     label: target.label,
-    leftover: totals.remaining,
+    leftover: totals.moneyLeft,
     spent: totals.spent,
     envelope: totals.envelope,
     theme,

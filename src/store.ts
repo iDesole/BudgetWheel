@@ -34,7 +34,18 @@ import {
   syncExtraFunds,
   withExtraFundsPool,
 } from "./lib/categories.ts";
-import { combineIncome, estimateTaxes, finalizeIncome, listedSources, normalizeSourceKinds, peelAddedFunds } from "./lib/income.ts";
+import {
+  combineIncome,
+  estimateTaxes,
+  finalizeIncome,
+  isPayWeekday,
+  listedSources,
+  normalizeSourceKinds,
+  peelAddedFunds,
+  takeHomeForMonth,
+  takeHomeForMonths,
+  takeHomeForScale,
+} from "./lib/income.ts";
 import { clampMoney, uid } from "./lib/money.ts";
 import {
   advancePeriodCursor,
@@ -376,6 +387,7 @@ export function loadDraftFromSource(sourceId: string): boolean {
     hoursPerWeek: source.hoursPerWeek,
     state: income.state,
     monthlyTakeHomeOverride: source.monthlyTakeHome,
+    payWeekday: source.payWeekday ?? null,
   });
   return true;
 }
@@ -548,6 +560,23 @@ function currentIncome(): number {
   return state.income?.monthlyTakeHome ?? 0;
 }
 
+function incomeForMonthId(monthId: string): number {
+  const parsed = parseMonthId(monthId);
+  if (!parsed) return currentIncome();
+  return takeHomeForMonth(state.income, parsed.year, parsed.month - 1);
+}
+
+function incomeForQuarterId(quarterId: string): number {
+  const parsed = parseQuarterId(quarterId);
+  if (!parsed) return currentIncome();
+  const start = new Date(parsed.year, (parsed.quarter - 1) * 3, 1);
+  return clampMoney(takeHomeForMonths(state.income, start, 3) / 3);
+}
+
+function incomeForYear(year: number): number {
+  return clampMoney(takeHomeForMonths(state.income, new Date(year, 0, 1), 12) / 12);
+}
+
 function historyPack(): HistoryPack {
   return {
     monthHistory: state.monthHistory ?? [],
@@ -567,7 +596,7 @@ function applyHistoryPack(pack: HistoryPack): void {
 }
 
 function archiveMonth(monthId: string): WheelSnapshot | null {
-  const snap = makeMonthSnapshot(monthId, state.transactions, currentIncome(), state.categories);
+  const snap = makeMonthSnapshot(monthId, state.transactions, incomeForMonthId(monthId), state.categories);
   if (!snap) return null;
   state.monthHistory = upsertSnapshot(state.monthHistory ?? [], snap, compareMonthId);
   state.previousSnapshot = snap;
@@ -579,7 +608,7 @@ function archiveQuarter(quarterId: string): WheelSnapshot | null {
     quarterId,
     state.transactions,
     state.monthHistory ?? [],
-    currentIncome(),
+    incomeForQuarterId(quarterId),
     state.categories,
   );
   if (!snap) return null;
@@ -594,7 +623,7 @@ function archiveYear(year: number): WheelSnapshot | null {
     state.transactions,
     state.quarterHistory ?? [],
     state.monthHistory ?? [],
-    currentIncome(),
+    incomeForYear(year),
     state.categories,
   );
   if (!snap) return null;
@@ -881,6 +910,7 @@ function sourceFromIncome(income: Income, kind: IncomeKind): IncomeSource {
     monthlyTakeHome: income.monthlyTakeHome,
     estimatedTaxAnnual: income.estimatedTaxAnnual,
     takeHomeOverridden: Math.abs(income.monthlyTakeHome - estimated) > 0.009,
+    payWeekday: income.type === "hourly" && isPayWeekday(draft.payWeekday) ? draft.payWeekday : undefined,
   };
 }
 
@@ -1078,7 +1108,7 @@ export function extraFundsInPeriod(now = new Date()): number {
 
 /** Take-home for the scale plus Extra Funds cash-in this period. */
 export function periodIncome(now = new Date()): number {
-  return clampMoney((state.income?.monthlyTakeHome ?? 0) * periodMultiplier() + extraFundsInPeriod(now));
+  return clampMoney(takeHomeForScale(state.income, state.wheelScale, now) + extraFundsInPeriod(now));
 }
 
 export function periodSpentMap(now = new Date()): Map<string, number> {
@@ -1113,13 +1143,18 @@ export function periodSpentMap(now = new Date()): Map<string, number> {
 export function wheelCategories(): Array<Category & { spent: number; remaining: number; envelope: number }> {
   const spent = periodSpentMap();
   const extraIn = extraFundsInPeriod();
+  const takeHome = takeHomeForScale(state.income, state.wheelScale);
+  const assigned = allocatedMonthly() * periodMultiplier();
+  const extraEnvelope = takeHome + extraIn - assigned;
   const rows = sortedCategories()
     .filter((c) => !c.hidden && (c.id === EXTRA_FUNDS_ID || c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0))
     .map((c) => {
       const used = spent.get(c.id) ?? 0;
+      if (c.id === EXTRA_FUNDS_ID) {
+        return { ...c, spent: used, envelope: extraEnvelope, remaining: extraEnvelope - used };
+      }
       const leftover = quarterlyBudget(c.budgeted);
-      const envelope = c.id === EXTRA_FUNDS_ID ? leftover + extraIn : leftover;
-      return { ...c, spent: used, envelope, remaining: envelope - used };
+      return { ...c, spent: used, envelope: leftover, remaining: leftover - used };
     });
   return withExtraFundsPool(rows);
 }

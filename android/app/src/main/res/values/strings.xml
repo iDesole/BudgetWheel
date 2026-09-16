@@ -18,11 +18,14 @@
     <string name="widget_stat_budgeted">budgeted</string>
     <string name="widget_stat_spent">spent</string>
     <string name="widget_stat_left">budget-left</string>
+    <string name="widget_stat_money_left">money-left</string>
     <string name="widget_stat_month_funds">month funds</string>
     <string name="widget_stat_added_funds">added funds</string>
     <string name="widget_stat_funds_lost">funds lost</string>
     <string name="widget_stat_oob">Out of budget</string>
     <string name="widget_stat_income">Income</string>
+    <string name="widget_r1_budgeted">Budgeted</string>
+    <string name="widget_r1_spent">Spent</string>
     <string name="widget_income_title">Income</string>
     <string name="widget_stat_over">over-Budget</string>
     <string name="widget_not_in_budget">Not in your budget</string>

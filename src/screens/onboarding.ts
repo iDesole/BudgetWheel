@@ -1,11 +1,16 @@
 import {
+  WEEKDAY_SHORT,
+  WEEKDAYS,
+  countWeekdayInMonth,
   estimateTaxes,
   incomeOrdinal,
   incomeSlotLabel,
+  isPayWeekday,
   isSideSource,
   listedSources,
   monthlyGrossFromDraft,
   nextIncomeNumber,
+  weeklyTakeHome,
 } from "../lib/income.ts";
 import { formatMoney, formatPct, parsePad, padDisplay, appendPad, escapeHtml } from "../lib/money.ts";
 import { findState, stateTaxLabel, US_STATES } from "../lib/states.ts";
@@ -246,7 +251,7 @@ export function renderPayType(): HTMLElement {
   el.querySelectorAll<HTMLButtonElement>("[data-type]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const type = btn.dataset.type === "hourly" ? "hourly" : "salary";
-      updateDraft({ type });
+      updateDraft({ type, payWeekday: type === "hourly" ? draft.payWeekday : null });
       if (type === "hourly") {
         seedPad(draft.hourlyWage);
         go({ id: "hourly-wage" });
@@ -301,9 +306,23 @@ export function renderSalaryAmount(): HTMLElement {
   });
   bindAmount(el, (amount) => {
     updateDraft({ salaryAmount: amount });
-    go(draft.slot && draft.slot !== "primary" && draft.state ? { id: "income-confirm" } : { id: "state" });
+    go(afterSalaryAmount());
   });
   return el;
+}
+
+function afterSalaryAmount(): Screen {
+  if (draft.slot && draft.slot !== "primary" && draft.state) return { id: "income-confirm" };
+  return { id: "state" };
+}
+
+function afterHourlyDetails(): Screen {
+  if (draft.slot && draft.slot !== "primary" && draft.state) return { id: "pay-day" };
+  return { id: "state" };
+}
+
+function afterState(): Screen {
+  return draft.type === "hourly" ? { id: "pay-day" } : { id: "income-confirm" };
 }
 
 export function renderHourlyWage(): HTMLElement {
@@ -335,10 +354,57 @@ export function renderHourlyHours(): HTMLElement {
     el,
     (amount) => {
       updateDraft({ hoursPerWeek: amount });
-      go(draft.slot && draft.slot !== "primary" && draft.state ? { id: "income-confirm" } : { id: "state" });
+      go(afterHourlyDetails());
     },
     { unit: "hours" },
   );
+  return el;
+}
+
+export function renderPayDay(): HTMLElement {
+  const selected = isPayWeekday(draft.payWeekday) ? draft.payWeekday : null;
+  const now = new Date();
+  const monthName = now.toLocaleDateString("en-US", { month: "long" });
+  const chips = WEEKDAY_SHORT.map((label, day) => {
+    const weeks = countWeekdayInMonth(now.getFullYear(), now.getMonth(), day);
+    return `
+        <button type="button" class="day-chip${selected === day ? " is-on" : ""}" data-day="${day}">
+          <span class="day-chip-name">${label}</span>
+          <span class="day-chip-meta">${weeks}×</span>
+        </button>`;
+  }).join("");
+  const fives = WEEKDAYS.filter((_, day) => countWeekdayInMonth(now.getFullYear(), now.getMonth(), day) === 5);
+  const hint = isPayWeekday(selected)
+    ? `${monthName} has ${countWeekdayInMonth(now.getFullYear(), now.getMonth(), selected)} ${WEEKDAYS[selected]}s.`
+    : fives.length
+      ? `${monthName} has five ${fives.map((n) => `${n}s`).join(", ")}.`
+      : `${monthName} has four of each weekday.`;
+  const el = document.createElement("div");
+  el.innerHTML = `
+    <section class="screen">
+      ${topBar("Payday")}
+      ${stepDots(4)}
+      <h2 class="headline">What day do you get paid?</h2>
+      <p class="sub">The wheel counts each payday that lands this month. Skip if you don’t have a set day.</p>
+      <div class="day-grid" role="listbox" aria-label="Payday">
+        ${chips}
+      </div>
+      <p class="hint">${escapeHtml(hint)}</p>
+      <div class="flex-spacer"></div>
+      <button type="button" class="btn btn-ghost btn-xl" data-skip>Skip — I don’t get paid on a set day</button>
+    </section>`;
+  bindBack(el);
+  el.querySelectorAll<HTMLButtonElement>("[data-day]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const day = Number(btn.dataset.day);
+      updateDraft({ payWeekday: isPayWeekday(day) ? day : null });
+      go({ id: "income-confirm" });
+    });
+  });
+  el.querySelector("[data-skip]")?.addEventListener("click", () => {
+    updateDraft({ payWeekday: null });
+    go({ id: "income-confirm" });
+  });
   return el;
 }
 
@@ -369,7 +435,7 @@ function bindStateRows(root: HTMLElement): void {
     btn.addEventListener("click", () => {
       updateDraft({ state: btn.dataset.state, monthlyTakeHomeOverride: undefined });
       setStateFilter("", { silent: true });
-      go({ id: "income-confirm" });
+      go(afterState());
     });
   });
 }
@@ -410,6 +476,15 @@ export function renderIncomeConfirm(): HTMLElement {
   const takeHome = draft.monthlyTakeHomeOverride ?? tax?.monthlyTakeHome ?? 0;
   const st = draft.state ? findState(draft.state) : undefined;
   const overridden = draft.monthlyTakeHomeOverride != null;
+  const now = new Date();
+  const payday = draft.type === "hourly" && isPayWeekday(draft.payWeekday) ? draft.payWeekday : null;
+  const weeksHere = payday != null ? countWeekdayInMonth(now.getFullYear(), now.getMonth(), payday) : 0;
+  const calendarHome = payday != null ? weeklyTakeHome(takeHome) * weeksHere : takeHome;
+  const monthName = now.toLocaleDateString("en-US", { month: "long" });
+  const calendarNote =
+    payday != null
+      ? `<p class="hint">${escapeHtml(monthName)} has ${weeksHere} ${WEEKDAYS[payday]}s, so this month is ${formatMoney(calendarHome)}. Typical month is ${formatMoney(takeHome)}.</p>`
+      : "";
   const el = document.createElement("div");
   el.innerHTML = `
     <section class="screen">
@@ -417,6 +492,7 @@ export function renderIncomeConfirm(): HTMLElement {
       ${stepDots(4)}
       <h2 class="headline">Your monthly income</h2>
       <p class="sub">Estimate only — single filer, standard deduction, 2026 federal brackets, FICA, and published 2026 state rates. No local tax, 401(k), or other deductions. Tap the number if your real take-home is different.</p>
+      ${calendarNote}
       <button type="button" class="income-hero" data-adjust>
         <span class="income-hero-label">Monthly take-home</span>
         <span class="income-hero-value">${formatMoney(takeHome)}</span>

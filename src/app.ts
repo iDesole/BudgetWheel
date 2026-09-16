@@ -7,6 +7,7 @@ import {
   renderHourlyWage,
   renderIncomeAdjust,
   renderIncomeConfirm,
+  renderPayDay,
   renderPayType,
   renderSideAmount,
   renderSalaryAmount,
@@ -90,6 +91,9 @@ function paint(): void {
       break;
     case "state":
       view = renderState();
+      break;
+    case "pay-day":
+      view = renderPayDay();
       break;
     case "income-confirm":
       view = renderIncomeConfirm();

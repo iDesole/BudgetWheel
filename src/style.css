@@ -320,6 +320,46 @@ input {
   gap: 12px;
 }
 
+.day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.day-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 64px;
+  padding: 8px 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-sm);
+  color: var(--on);
+}
+
+.day-chip.is-on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.day-chip:active {
+  transform: scale(0.96);
+}
+
+.day-chip-name {
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.day-chip-meta {
+  font-size: 0.68rem;
+  color: var(--on-soft);
+}
+
 .choice-card,
 .settings-row,
 .state-row,
@@ -938,7 +978,8 @@ input {
 }
 
 .screen-home.is-graph .home-head,
-.screen-home.is-graph .over-warn {
+.screen-home.is-graph .over-warn,
+.screen-home .wheel-totals {
   flex: 0 0 auto;
 }
 
@@ -1071,6 +1112,15 @@ input {
 }
 
 @media (max-width: 360px) {
+  .day-chip {
+    min-height: 56px;
+    padding: 6px 1px;
+  }
+
+  .day-chip-name {
+    font-size: 0.72rem;
+  }
+
   .screen {
     padding-left: 14px;
     padding-right: 14px;
@@ -1313,9 +1363,10 @@ input {
 }
 
 .graph-detail-head.is-totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .graph-detail-income {
@@ -1342,15 +1393,16 @@ input {
   letter-spacing: 0.02em;
 }
 
+.graph-detail-head.is-totals .graph-detail-copy {
+  flex: none;
+  text-align: center;
+  align-items: center;
+}
+
 .graph-detail-head.is-totals .graph-detail-copy strong {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
-}
-
-.graph-detail-head.is-totals .graph-detail-copy.is-end {
-  flex: 0 0 auto;
-  text-align: right;
-  align-items: flex-end;
+  font-size: 0.95rem;
 }
 
 .graph-detail-head.is-totals .graph-detail-copy strong.is-neg {
@@ -1359,7 +1411,7 @@ input {
 
 .graph-detail-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 10px 0 4px;
 }
@@ -1477,7 +1529,7 @@ input {
   position: relative;
   width: 100%;
   max-width: 360px;
-  margin: 4px auto 8px;
+  margin: 8px auto 8px;
   overflow: visible;
 }
 
@@ -1556,40 +1608,17 @@ input {
   left: 0;
 }
 
-.wheel-corner-totals {
-  position: absolute;
-  top: 0;
-  z-index: 5;
-  width: auto;
-  max-width: 46%;
-  pointer-events: none;
-  overflow: visible;
+.wheel-totals {
+  flex: 0 0 auto;
+  margin: 2px 0 10px;
 }
 
-.wheel-corner-totals.is-oob {
-  right: 0;
-}
-
-.wheel-corner-totals.is-left {
-  left: 0;
-}
-
-.wheel-corner-totals .graph-stat {
-  padding: 5px 8px;
-  border-radius: 13px;
-  overflow: visible;
-}
-
-.wheel-corner-totals .graph-stat-val {
+.wheel-totals .graph-stat-val {
   font-size: 0.88rem;
-  overflow: visible;
-  white-space: nowrap;
 }
 
-.wheel-corner-totals .graph-stat-lbl {
-  margin-top: 1px;
-  font-size: 0.65rem;
-  white-space: nowrap;
+.wheel-totals .graph-stat-lbl {
+  font-size: 0.62rem;
 }
 
 .wheel-cycle-btn.is-right {
@@ -2146,11 +2175,21 @@ body.is-widget .toast {
   animation: widgetSwap 220ms var(--ease);
 }
 
+.widget-stage .wheel-totals {
+  margin: 2px 0 6px;
+}
+
 .widget-stage .wheel-wrap {
   width: 100%;
-  max-width: 280px;
-  margin: auto;
+  max-width: 248px;
+  margin: 12px auto 8px;
   overflow: visible;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-self: center;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
 }
 
 .widget-cats {
@@ -2207,15 +2246,16 @@ body.is-widget .toast {
 @media (max-height: 640px) {
   .screen-widget .wheel-wrap {
     width: 100%;
-    max-width: 200px;
+    max-width: 184px;
+    margin: 6px auto 0;
   }
 }
 
 @media (max-height: 520px) {
   .screen-widget .wheel-wrap {
     width: 100%;
-    max-width: 160px;
-    margin: 0 auto 4px;
+    max-width: 148px;
+    margin: 4px auto 0;
   }
 
   .widget-left {

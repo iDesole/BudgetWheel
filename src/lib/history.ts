@@ -140,16 +140,25 @@ function snapshotCategories(
   categories: Category[],
   extraIn: number,
   periodMonths: number,
+  income: number,
 ): SnapshotCategory[] {
   const extraMonthly = periodMonths > 0 ? extraIn / periodMonths : extraIn;
+  const assigned = categories
+    .filter((c) => c.id !== EXTRA_FUNDS_ID && !c.hidden)
+    .reduce((sum, c) => sum + c.budgeted, 0);
+  const extraLeftover = clampMoney(income - assigned + extraMonthly);
   return categories
-    .filter((c) => c.budgeted > 0 || (spent.get(c.id) ?? 0) > 0 || (c.id === EXTRA_FUNDS_ID && extraIn > 0.009))
+    .filter(
+      (c) =>
+        c.budgeted > 0 ||
+        (spent.get(c.id) ?? 0) > 0 ||
+        (c.id === EXTRA_FUNDS_ID && extraLeftover > 0.009),
+    )
     .map((c) => ({
       id: c.id,
       name: c.name,
       color: c.color,
-      budgetedMonthly:
-        c.id === EXTRA_FUNDS_ID ? clampMoney(c.budgeted + extraMonthly) : c.budgeted,
+      budgetedMonthly: c.id === EXTRA_FUNDS_ID ? extraLeftover : c.budgeted,
       spent: spent.get(c.id) ?? 0,
     }));
 }
@@ -176,7 +185,7 @@ export function snapshotFromSpend(
     endIso,
     periodMonths,
     monthlyIncome: clampMoney(income + extraMonthly),
-    categories: snapshotCategories(spent, categories, extraIn, periodMonths),
+    categories: snapshotCategories(spent, categories, extraIn, periodMonths, income),
     capturedAt: Date.now(),
   };
 }

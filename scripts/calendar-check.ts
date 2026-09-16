@@ -19,6 +19,8 @@ import {
   quarterIdFromMonthId,
   quarterYear,
 } from "../src/lib/quarter.ts";
+import { countWeekdayInMonth, takeHomeForMonth, weeklyTakeHome } from "../src/lib/income.ts";
+import type { Income } from "../src/types.ts";
 
 const failures: string[] = [];
 
@@ -138,10 +140,48 @@ assert(range.includes("2026") && range.includes("Oct") && range.includes("Dec"),
 assert(formatQuarterRange("", "") === "", "empty range is blank");
 assert(formatQuarterRange("nope", "2026-12-31") === "", "bad iso is blank");
 
+// --- payday weekday counts (0=Sun). Sep 2026 starts Tuesday and has 5 Tue/Wed. ---
+assert(new Date(2026, 8, 1).getDay() === 2, "Sep 1 2026 is Tuesday");
+assert(countWeekdayInMonth(2026, 8, 0) === 4, "Sep 2026 has 4 Sundays");
+assert(countWeekdayInMonth(2026, 8, 1) === 4, "Sep 2026 has 4 Mondays");
+assert(countWeekdayInMonth(2026, 8, 2) === 5, "Sep 2026 has 5 Tuesdays");
+assert(countWeekdayInMonth(2026, 8, 3) === 5, "Sep 2026 has 5 Wednesdays");
+assert(countWeekdayInMonth(2026, 8, 4) === 4, "Sep 2026 has 4 Thursdays");
+assert(countWeekdayInMonth(2026, 8, 5) === 4, "Sep 2026 has 4 Fridays");
+assert(countWeekdayInMonth(2026, 8, 6) === 4, "Sep 2026 has 4 Saturdays");
+assert(countWeekdayInMonth(2026, 7, 6) === 5, "Aug 2026 has 5 Saturdays");
+assert(countWeekdayInMonth(2026, 1, 0) === 4, "Feb 2026 has 4 Sundays");
+assert(countWeekdayInMonth(2028, 1, 2) === 5, "Feb 2028 leap has 5 Tuesdays");
+assert(Math.abs(weeklyTakeHome(5200) - 1200) < 0.001, "weekly take-home is monthly * 12 / 52");
+
+const hourlyTue: Income = {
+  type: "hourly",
+  state: "TX",
+  monthlyGross: 5200,
+  monthlyTakeHome: 5200,
+  estimatedTaxAnnual: 0,
+  sources: [
+    {
+      id: "inc_1",
+      kind: "primary",
+      type: "hourly",
+      monthlyGross: 5200,
+      monthlyTakeHome: 5200,
+      estimatedTaxAnnual: 0,
+      payWeekday: 2,
+    },
+  ],
+};
+const salary: Income = { ...hourlyTue, type: "salary", sources: [{ ...hourlyTue.sources[0], type: "salary", payWeekday: undefined }] };
+assert(takeHomeForMonth(hourlyTue, 2026, 8) === 6000, "Sep 2026 5 Tuesdays → 5 paychecks");
+assert(takeHomeForMonth(hourlyTue, 2026, 1) === 4800, "Feb 2026 4 Tuesdays → 4 paychecks");
+assert(takeHomeForMonth(salary, 2026, 8) === 5200, "salary ignores weekday count");
+assert(takeHomeForMonth({ ...hourlyTue, sources: [{ ...hourlyTue.sources[0], payWeekday: undefined }] }, 2026, 8) === 5200, "skipped payday uses typical month");
+
 if (failures.length) {
   console.error(`calendar-check failed (${failures.length}):`);
   for (const f of failures) console.error(`  - ${f}`);
   process.exit(1);
 }
 
-console.log("calendar-check: all year, quarter, month, and leap-year cases passed");
+console.log("calendar-check: all year, quarter, month, leap-year, and payday cases passed");

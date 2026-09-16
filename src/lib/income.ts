@@ -1,4 +1,4 @@
-import type { Income, IncomeDraft, IncomeSource, TaxBreakdown, Transaction } from "../types.ts";
+import type { Income, IncomeDraft, IncomeSource, TaxBreakdown, Transaction, WheelScale } from "../types.ts";
 import { EXTRA_FUNDS_ID } from "./categories.ts";
 import { estimateStateIncomeTax, findState } from "./states.ts";
 import { clampMoney, uid } from "./money.ts";
@@ -52,10 +52,84 @@ export function isSideSource(source: Pick<IncomeSource, "kind" | "type">): boole
   return source.kind === "side" || source.type === "side";
 }
 
+export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+export const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+export function isPayWeekday(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6;
+}
+
 export function sourceTypeLabel(source: IncomeSource): string {
   if (isSideSource(source)) return "Side · after tax";
-  if (source.type === "hourly") return "Hourly";
+  if (source.type === "hourly") {
+    if (isPayWeekday(source.payWeekday)) return `Hourly · ${WEEKDAYS[source.payWeekday]}s`;
+    return "Hourly";
+  }
   return source.salaryPeriod === "monthly" ? "Monthly salary" : "Salary";
+}
+
+/** How many times `weekday` (0=Sun) lands in a calendar month. Month is 0-indexed. */
+export function countWeekdayInMonth(year: number, monthIndex: number, weekday: number): number {
+  const first = new Date(year, monthIndex, 1);
+  const offset = (weekday - first.getDay() + 7) % 7;
+  const firstHit = 1 + offset;
+  const lastDate = new Date(year, monthIndex + 1, 0).getDate();
+  if (firstHit > lastDate) return 0;
+  return Math.floor((lastDate - firstHit) / 7) + 1;
+}
+
+export function countWeekdayInMonths(
+  start: Date,
+  monthCount: number,
+  weekday: number,
+): number {
+  let n = 0;
+  for (let i = 0; i < monthCount; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    n += countWeekdayInMonth(d.getFullYear(), d.getMonth(), weekday);
+  }
+  return n;
+}
+
+export function weeklyTakeHome(monthly: number): number {
+  return clampMoney((monthly * 12) / 52);
+}
+
+function sourceTakeHomeForMonth(source: IncomeSource, year: number, monthIndex: number): number {
+  if (source.type === "hourly" && isPayWeekday(source.payWeekday)) {
+    const weeks = countWeekdayInMonth(year, monthIndex, source.payWeekday);
+    return clampMoney(weeklyTakeHome(source.monthlyTakeHome) * weeks);
+  }
+  return clampMoney(source.monthlyTakeHome);
+}
+
+/** Typical-month take-home scaled to the actual paydays in this calendar month. Salary is unchanged. */
+export function takeHomeForMonth(income: Income | null | undefined, year: number, monthIndex: number): number {
+  const sources = listedSources(income);
+  if (!sources.length) return clampMoney(income?.monthlyTakeHome ?? 0);
+  return clampMoney(sources.reduce((sum, s) => sum + sourceTakeHomeForMonth(s, year, monthIndex), 0));
+}
+
+export function takeHomeForMonths(income: Income | null | undefined, start: Date, monthCount: number): number {
+  let sum = 0;
+  for (let i = 0; i < monthCount; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    sum += takeHomeForMonth(income, d.getFullYear(), d.getMonth());
+  }
+  return clampMoney(sum);
+}
+
+export function takeHomeForScale(
+  income: Income | null | undefined,
+  scale: WheelScale,
+  now = new Date(),
+): number {
+  if (scale === "year") return takeHomeForMonths(income, new Date(now.getFullYear(), 0, 1), 12);
+  if (scale === "quarter") {
+    const qStart = Math.floor(now.getMonth() / 3) * 3;
+    return takeHomeForMonths(income, new Date(now.getFullYear(), qStart, 1), 3);
+  }
+  return takeHomeForMonth(income, now.getFullYear(), now.getMonth());
 }
 
 /**

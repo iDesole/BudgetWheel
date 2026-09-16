@@ -1,0 +1,38 @@
+BUDGET WHEEL — IN-APP PRODUCT (Play Console)
+Monetize → In-app products → Create product
+
+================================================================
+Product ID
+================================================================
+widget_unlock
+
+Type: one-time product
+Price: USD 1.99
+
+================================================================
+Name (55)
+================================================================
+Home Widget
+
+================================================================
+Description (200)
+================================================================
+Pin the spending wheel to your home screen. See what’s left this month and log a purchase without opening the app. One-time unlock.
+
+================================================================
+Tags (lowercase)
+================================================================
+widget
+home screen
+home widget
+budgeting
+budget
+expense tracker
+expenses
+spending
+personal finance
+money
+finance
+savings
+tracking
+android widget

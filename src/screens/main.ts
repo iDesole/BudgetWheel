@@ -1,7 +1,7 @@
 /**
  * In-app screens after onboarding: home wheel/graph, spend history,
  * purchases, archived periods, and settings (appearance, widget pin, Help).
- * Shared chrome (graph header, top bar, Extra Funds / out-of-budget totals)
+ * Shared chrome (graph header, leftover tabs, Extra Funds / out-of-budget)
  * lives at the top so home and history render the same cards. Extra Funds is
  * leftover take-home plus cash-in activity — not a second income source.
  * Selected Extra Funds uses Add Funds. Tour spotlight ids live on the
@@ -105,39 +105,54 @@ function budgetChartMarkup(
 
 
 
-function wheelCornerTotalsMarkup(totals: { outOfBudget: number; remaining: number }): string {
-  const oob = totals.outOfBudget > 0.009;
-  return `<div class="wheel-corner-totals is-oob">
-    <div class="graph-stat">
-      <span class="graph-stat-val${oob ? " is-neg" : ""}">${formatMoney(totals.outOfBudget)}</span>
-      <span class="graph-stat-lbl">out of budget</span>
-    </div>
-  </div>
-  <div class="wheel-corner-totals is-left">
-    ${budgetLeftStat(totals.remaining)}
-  </div>`;
+function moneyLeftStat(amount: number): string {
+  const over = amount < 0;
+  return `<div class="graph-stat">
+      <span class="graph-stat-val${over ? " is-neg" : ""}">${formatMoney(over ? -amount : amount)}</span>
+      <span class="graph-stat-lbl">money-left</span>
+    </div>`;
 }
 
 function budgetLeftStat(remaining: number): string {
   const over = remaining < 0;
   return `<div class="graph-stat">
-      <span class="graph-stat-val ${over ? "is-neg" : ""}">${formatMoney(over ? -remaining : remaining)}</span>
+      <span class="graph-stat-val${over ? " is-neg" : ""}">${formatMoney(over ? -remaining : remaining)}</span>
       <span class="graph-stat-lbl">${over ? "over-Budget" : "budget-left"}</span>
     </div>`;
+}
+
+function outOfBudgetStat(amount: number): string {
+  const oob = amount > 0.009;
+  return `<div class="graph-stat">
+      <span class="graph-stat-val${oob ? " is-neg" : ""}">${formatMoney(amount)}</span>
+      <span class="graph-stat-lbl">out of budget</span>
+    </div>`;
+}
+
+function leftoverTabsMarkup(
+  totals: { moneyLeft: number; remaining: number; outOfBudget: number },
+  extraClass = "",
+): string {
+  return `<div class="graph-detail-stats${extraClass ? ` ${extraClass}` : ""}">
+    ${moneyLeftStat(totals.moneyLeft)}
+    ${budgetLeftStat(totals.remaining)}
+    ${outOfBudgetStat(totals.outOfBudget)}
+  </div>`;
 }
 
 function wheelBlockMarkup(
   slices: Array<WheelSlice & { remaining: number }>,
   opts: {
     selected: { id: string; name: string; remaining: number; spent: number; envelope: number } | null;
-    totals: { outOfBudget: number; remaining: number; envelope: number; spent: number };
+    totals: { outOfBudget: number; remaining: number; envelope: number; spent: number; moneyLeft: number };
     periodIncome: number;
     tour?: boolean;
   },
 ): string {
   const selected = opts.selected;
   const centerValue = selected ? selected.remaining : opts.periodIncome;
-  return `<div class="wheel-wrap">
+  return `${leftoverTabsMarkup(opts.totals, "wheel-totals")}
+      <div class="wheel-wrap">
         <div class="wheel-stage"${opts.tour ? ` id="tour-wheel" data-tour="wheel"` : ""}>
         ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
         ${wheelCenterMarkup({
@@ -148,7 +163,6 @@ function wheelBlockMarkup(
           subSecondary: selected ? undefined : `of ${formatMoney(opts.totals.envelope)} budget`,
         })}
         </div>
-        ${wheelCornerTotalsMarkup(opts.totals)}
         ${
           slices.length
             ? `<button type="button" class="wheel-cycle-btn is-left" data-cycle="1" aria-label="Previous category">${backChevron}</button>
@@ -231,8 +245,21 @@ function selectedSliceSub(selected: { id: string; spent: number; envelope: numbe
   return `${formatMoney(selected.spent)} of ${formatMoney(selected.envelope)}`;
 }
 
-function totalsStatsMarkup(totals: { envelope: number; spent: number; remaining: number }): string {
-  return budgetSpentOverMarkup(totals);
+function totalsHeadMarkup(opts: { periodIncome: number; envelope: number; spent: number }): string {
+  return `<div class="graph-detail-head is-totals">
+                <span class="graph-detail-copy">
+                  <span class="muted">Income</span>
+                  <strong>${formatMoney(opts.periodIncome)}</strong>
+                </span>
+                <span class="graph-detail-copy">
+                  <span class="muted">Budgeted</span>
+                  <strong>${opts.envelope > 0 ? formatMoney(opts.envelope) : "—"}</strong>
+                </span>
+                <span class="graph-detail-copy">
+                  <span class="muted">Spent</span>
+                  <strong>${formatMoney(opts.spent)}</strong>
+                </span>
+              </div>`;
 }
 
 function incomeShareLabel(budgeted: number, monthlyIncome: number, categoryId?: string): string {
@@ -271,7 +298,7 @@ function graphDetailMarkup(opts: {
     spent: number;
     remaining: number;
   } | null;
-  totals: { envelope: number; spent: number; outOfBudget: number; remaining: number };
+  totals: { envelope: number; spent: number; outOfBudget: number; remaining: number; moneyLeft: number };
   monthlyIncome: number;
   periodIncome: number;
   totalBudgeted: number;
@@ -297,19 +324,13 @@ function graphDetailMarkup(opts: {
               ${extraCard}
             </div>`;
   }
-  const oob = opts.totals.outOfBudget > 0.009;
   return `<div class="graph-detail">
-              <div class="graph-detail-head is-totals">
-                <span class="graph-detail-copy">
-                  <span class="muted">Income</span>
-                  <strong>${formatMoney(opts.periodIncome)}</strong>
-                </span>
-                <span class="graph-detail-copy is-end">
-                  <span class="muted">Out of budget</span>
-                  <strong${oob ? ` class="is-neg"` : ""}>${formatMoney(opts.totals.outOfBudget)}</strong>
-                </span>
-              </div>
-              ${totalsStatsMarkup(opts.totals)}
+              ${totalsHeadMarkup({
+                periodIncome: opts.periodIncome,
+                envelope: opts.totals.envelope,
+                spent: opts.totals.spent,
+              })}
+              ${leftoverTabsMarkup(opts.totals)}
             </div>`;
 }
 

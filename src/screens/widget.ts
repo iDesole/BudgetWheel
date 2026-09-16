@@ -17,6 +17,7 @@ import {
   selectedSliceId,
 } from "../store.ts";
 import { EXTRA_FUNDS_ID, budgetSpendTotals, extraFundsAdded, isFundsIn, withExtraFundsPool } from "../lib/categories.ts";
+import { takeHomeForMonth } from "../lib/income.ts";
 import { backChevron } from "../ui/icons.ts";
 import { bindNumpad, numpadMarkup } from "../ui/numpad.ts";
 import { wheelCenterMarkup, wheelSvg } from "../ui/wheel.ts";
@@ -58,7 +59,7 @@ function monthIncome(): number {
     if (at.getFullYear() !== now.getFullYear() || at.getMonth() !== now.getMonth()) continue;
     extraIn += extraFundsAdded(tx);
   }
-  return (state.income?.monthlyTakeHome ?? 0) + extraIn;
+  return takeHomeForMonth(state.income, now.getFullYear(), now.getMonth()) + extraIn;
 }
 
 function goPhase(next: WidgetPhase): void {
@@ -176,6 +177,20 @@ function wheelMarkup(): string {
           <p class="widget-left ${centerValue < 0 ? "is-neg" : ""}">${formatMoney(centerValue)}</p>
         </header>
         <div class="widget-stage" data-phase="wheel">
+          <div class="graph-detail-stats wheel-totals">
+            <div class="graph-stat">
+              <span class="graph-stat-val${totals.moneyLeft < 0 ? " is-neg" : ""}">${formatMoney(totals.moneyLeft < 0 ? -totals.moneyLeft : totals.moneyLeft)}</span>
+              <span class="graph-stat-lbl">money-left</span>
+            </div>
+            <div class="graph-stat">
+              <span class="graph-stat-val${totals.remaining < 0 ? " is-neg" : ""}">${formatMoney(totals.remaining < 0 ? -totals.remaining : totals.remaining)}</span>
+              <span class="graph-stat-lbl">${totals.remaining < 0 ? "over-Budget" : "budget-left"}</span>
+            </div>
+            <div class="graph-stat">
+              <span class="graph-stat-val${totals.outOfBudget > 0.009 ? " is-neg" : ""}">${formatMoney(totals.outOfBudget)}</span>
+              <span class="graph-stat-lbl">out of budget</span>
+            </div>
+          </div>
           <div class="wheel-wrap">
             <div class="wheel-stage">
             ${wheelSvg(slices, { selectedId: selectedSliceId, interactive: true })}
@@ -190,18 +205,6 @@ function wheelMarkup(): string {
                 : `${formatMoney(totals.spent)} spent`,
               subSecondary: selected ? undefined : `of ${formatMoney(totals.envelope)} budget`,
             })}
-            </div>
-            <div class="wheel-corner-totals is-oob">
-              <div class="graph-stat">
-                <span class="graph-stat-val${totals.outOfBudget > 0.009 ? " is-neg" : ""}">${formatMoney(totals.outOfBudget)}</span>
-                <span class="graph-stat-lbl">out of budget</span>
-              </div>
-            </div>
-            <div class="wheel-corner-totals is-left">
-              <div class="graph-stat">
-                <span class="graph-stat-val${totals.remaining < 0 ? " is-neg" : ""}">${formatMoney(totals.remaining < 0 ? -totals.remaining : totals.remaining)}</span>
-                <span class="graph-stat-lbl">${totals.remaining < 0 ? "over-Budget" : "budget-left"}</span>
-              </div>
             </div>
           </div>
         </div>

@@ -17,6 +17,8 @@ export interface IncomeSource {
   estimatedTaxAnnual: number;
   /** True when the user typed take-home instead of using the tax estimate. */
   takeHomeOverridden?: boolean;
+  /** JS weekday 0–6 for hourly weekly pay. Omitted if salary or skipped. */
+  payWeekday?: number;
 }
 
 export interface Income {
@@ -111,6 +113,7 @@ export type Screen =
   | { id: "hourly-wage" }
   | { id: "hourly-hours" }
   | { id: "state" }
+  | { id: "pay-day" }
   | { id: "income-confirm" }
   | { id: "income-adjust" }
   | { id: "extra-income" }
@@ -136,6 +139,8 @@ export interface IncomeDraft {
   monthlyTakeHomeOverride?: number;
   slot?: IncomeKind;
   sourceId?: string;
+  /** Hourly payday. `null` means skipped; omit or 0–6 for a weekday. */
+  payWeekday?: number | null;
 }
 
 export interface TaxBreakdown {
