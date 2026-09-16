@@ -2,6 +2,7 @@
   "name": "budgetwheel",
   "private": true,
   "license": "UNLICENSED",
+  "author": "Chase Wilson <chasewilsonbusiness@gmail.com>",
   "version": "1.1.5",
   "type": "module",
   "scripts": {
